@@ -1,0 +1,56 @@
+code: de
+name: German
+article: true
+
+pos_labels:
+  noun: "Substantiv / Nomen"
+  verb: Verb
+  adj: Adjektiv
+  adv: Adverb
+  pron: Pronomen
+  prep: "Präposition"
+  conj: Konjunktion
+  interj: Interjektion
+  num: Zahlwort
+  phrase: Redewendung
+  other: anderes
+
+forms:
+  noun:
+    - {key: gender, label: "Род"}
+    - {key: article, label: "Артикль"}
+    - {key: nominative, label: "Nominativ — wer? was?"}
+    - {key: genitive, label: "Genitiv — wessen?"}
+    - {key: dative, label: "Dativ — wem?"}
+    - {key: accusative, label: "Akkusativ — wen? was?"}
+    - {key: plural, label: "Множественное число"}
+  verb:
+    - {key: infinitive, label: Infinitiv}
+    - {key: present_ich, label: "Präsens (ich)"}
+    - {key: present_du, label: "Präsens (du)"}
+    - {key: present_er, label: "Präsens (er/sie/es)"}
+    - {key: preterite_ich, label: "Präteritum (ich)"}
+    - {key: perfect_hat, label: "Perfekt (hat/ist + Partizip II)"}
+  adj:
+    - {key: positive, label: "Positiv (Grundform)"}
+    - {key: comparative, label: Komparativ}
+    - {key: superlative, label: Superlativ}
+
+tts:
+  voice_female: de-DE-KatjaNeural
+  voice_male: de-DE-ConradNeural
+  default_voice: female
+
+anki:
+  deck_name: Deutsch
+  note_type: LanguageCard
+
+back_labels:
+  translation: "Перевод"
+  part_of_speech: "Часть речи"
+  grammar: "Грамматика"
+  example: "Пример"
+  example_translation: "Перевод примера"
+  pronunciation: "Транскрипция"
+  level: "Уровень"
+  topic: "Тема"
