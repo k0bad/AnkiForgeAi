@@ -138,6 +138,9 @@ pending → approved (авто-принято) → pushed (в Anki)
 ### Конфиг (config.yaml) — ключевые параметры
 
 ```yaml
+language: nb                    # активный языковой профиль → languages/{code}/
+ui_language: ru                 # язык подписей бэк-стороны карточки: ru | en
+
 dedupe:
   fuzzy_threshold_review: 85   # ≥ 85 → обязательный ревью
   fuzzy_threshold_auto: 82     # < 82 → авто-добавление; 82-84 → semiauto ревью
@@ -154,6 +157,11 @@ images:
 
 review:
   mode: semiauto                # manual / semiauto / auto
+
+enrich:
+  grammar: true                 # включить/выключить отдельные стадии обогащения
+  examples: true                # (настраивается в ankiforgeai setup)
+  pronunciation: true
 ```
 
 ### Секреты (.env)
@@ -257,6 +265,7 @@ cp prompts/*.md languages/{code}/prompts/
 | `example_sentence.md` | Генерация примера | Естественный контекст для языка |
 | `url_extract.md` | Извлечение слов из URL | Язык страниц |
 | `russian_pronunciation.md` | Транскрипция | Особенности произношения языка |
+| `translation.md` | Перевод (fallback, если ingest не задал `translation`) | Название языка в тексте промпта |
 
 ### Шаг 3: Проверить
 
@@ -277,11 +286,12 @@ pytest tests/test_language.py -v
 |------|----------------|---------|---------------|
 | Норвежский (nb) | род (m/f/n) + 4 формы числа/определённости | 4 времени | 3 формы + сравнение |
 | Немецкий (de) | род + 4 падежа + мн.ч | 5 форм лица + 2 времени | 3 степени |
+| Английский (en) | ед./мн. число | 5 форм (base/past/participle/-ing/3rd person) | positive/comparative/superlative |
+| Испанский (es) | род + число | 12 форм (5 лиц × наклонения/времена + причастие/герундий) | 4 формы (m/f × ед./мн.) |
 | Французский* | род (m/f) + число | 6 форм лица + времена | род + число + сравнение |
-| Английский* | только число | 3-4 формы | сравнение |
 | Японский* | нет рода/числа | вежливые/простые формы | い/な прилагательные |
 
-*\*Примеры — можно реализовать через language.yaml без правки кода.*
+*\*Ещё не реализовано — можно добавить через `language.yaml` без правки кода.*
 
 ---
 
@@ -412,3 +422,5 @@ curl -X POST http://localhost:5678/webhook/ankicards-notify -H 'Content-Type: ap
 - [x] LICENSE (MIT)
 - [x] CHANGELOG
 - [ ] Конфигурируемый Note Type (сейчас жёстко `LanguageCard` с 12 полями)
+- [ ] Pluggable-слой уведомлений (не только Telegram/n8n) — см. [issue #2](https://github.com/k0bad/AnkiForgeAi/issues/2)
+- [ ] Выбор способа транскрипции: практическая (кириллица) vs IPA — см. [issue #4](https://github.com/k0bad/AnkiForgeAi/issues/4)
