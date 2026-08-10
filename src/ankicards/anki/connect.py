@@ -15,10 +15,11 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
+from .._net import http_retry
 from ..config import Config
 
 ANKI_CONNECT_VERSION = 6
@@ -38,14 +39,18 @@ class AnkiConnect:
         self.note_type = cfg.anki.note_type
         self._timeout = timeout
 
+    @http_retry
+    async def _post(self, payload: dict[str, Any]) -> Any:
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.post(self.url, json=payload)
+            response.raise_for_status()
+            return response.json()
+
     async def _call(self, action: str, **params: Any) -> Any:
         """Вызвать AnkiConnect action и вернуть result."""
         payload = {"action": action, "version": ANKI_CONNECT_VERSION, "params": params}
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.post(self.url, json=payload)
-                response.raise_for_status()
-                data = response.json()
+            data = await self._post(payload)
         except httpx.HTTPError as e:
             raise AnkiConnectError(f"HTTP error calling {action}: {e}") from e
 
@@ -58,7 +63,7 @@ class AnkiConnect:
     # ───────────── Deck ─────────────
 
     async def deck_names(self) -> list[str]:
-        return await self._call("deckNames")
+        return cast(list[str], await self._call("deckNames"))
 
     async def ensure_deck(self) -> None:
         """Создать deck, если не существует."""
@@ -69,7 +74,7 @@ class AnkiConnect:
     # ───────────── Model / Note Type ─────────────
 
     async def model_names(self) -> list[str]:
-        return await self._call("modelNames")
+        return cast(list[str], await self._call("modelNames"))
 
     async def create_model(
         self,
@@ -101,7 +106,7 @@ class AnkiConnect:
                 "duplicateScope": "deck",
             },
         }
-        return await self._call("addNote", note=note)
+        return cast(int, await self._call("addNote", note=note))
 
     async def update_note_fields(self, note_id: int, fields: dict[str, str]) -> None:
         await self._call(
@@ -114,13 +119,13 @@ class AnkiConnect:
 
     async def find_notes(self, query: str) -> list[int]:
         """Поиск заметок по Anki-синтаксису ('deck:Norsk Word:gå')."""
-        return await self._call("findNotes", query=query)
+        return cast(list[int], await self._call("findNotes", query=query))
 
     async def notes_info(self, note_ids: list[int]) -> list[dict]:
         """Получить детали заметок (поля, теги)."""
         if not note_ids:
             return []
-        return await self._call("notesInfo", notes=note_ids)
+        return cast(list[dict], await self._call("notesInfo", notes=note_ids))
 
     # ───────────── Media ─────────────
 
@@ -128,4 +133,4 @@ class AnkiConnect:
         """Загрузить файл в collection.media. Возвращает имя файла в Anki."""
         data = file_path.read_bytes()
         encoded = base64.b64encode(data).decode("ascii")
-        return await self._call("storeMediaFile", filename=filename, data=encoded)
+        return cast(str, await self._call("storeMediaFile", filename=filename, data=encoded))

@@ -13,11 +13,20 @@ from __future__ import annotations
 import httpx
 import trafilatura
 
+from .._net import http_retry
 from ..config import get_config
 from ..llm import call_json, load_prompt
 from ..models import POS, Card, Level, Status
 
 MAX_TEXT_CHARS = 12_000
+
+
+@http_retry
+async def _fetch(url: str, timeout: float) -> httpx.Response:
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+        return response
 
 
 async def ingest_from_url(url: str, level: str = "A2", topic: str | None = None) -> list[Card]:
@@ -26,13 +35,11 @@ async def ingest_from_url(url: str, level: str = "A2", topic: str | None = None)
     limit_bytes = cfg.ingest.url_max_size_mb * 1024 * 1024
     timeout = cfg.ingest.url_timeout_seconds
 
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        content = response.content
-        if len(content) > limit_bytes:
-            raise ValueError(f"Страница слишком большая: {len(content)} > {limit_bytes} байт")
-        html = response.text
+    response = await _fetch(url, timeout)
+    content = response.content
+    if len(content) > limit_bytes:
+        raise ValueError(f"Страница слишком большая: {len(content)} > {limit_bytes} байт")
+    html = response.text
 
     extracted = trafilatura.extract(html, include_comments=False, include_tables=False)
     if not extracted:

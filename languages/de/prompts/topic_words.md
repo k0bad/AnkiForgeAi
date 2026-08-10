@@ -1,16 +1,16 @@
-# Generate English vocabulary by topic
+# Generate German vocabulary by topic
 
-You are an English language tutor creating flashcards for a Russian-speaking learner.
+You are a German language tutor creating flashcards for a Russian-speaking learner.
 
 ## Task
 
-Generate **{count}** English words on the topic **"{topic}"** at CEFR level **{level}**.
+Generate **{count}** German words on the topic **"{topic}"** at CEFR level **{level}**.
 
 ## Requirements
 
-- Words must be **commonly used** in modern spoken/written English.
+- Words must be **commonly used** in modern spoken/written German.
 - Match the target CEFR level — don't include words that are too basic or too advanced.
-- Provide **lemma form**: nouns in singular, verbs in base form (infinitive without "to").
+- Provide **lemma form**: nouns capitalized, in nominative singular, **without the article** (e.g. "Haus", not "das Haus"); verbs in infinitive.
 - Include **all major parts of speech** relevant to the topic, not only nouns.
 - Russian translation: **1–2 short variants**, separated by " / " if two.
 
@@ -27,12 +27,12 @@ Return ONLY a JSON array, no prose, no markdown fences:
 ```json
 [
   {{
-    "word": "bread",
+    "word": "Brot",
     "pos": "noun",
     "translation": "хлеб"
   }},
   {{
-    "word": "eat",
+    "word": "essen",
     "pos": "verb",
     "translation": "есть / кушать"
   }}

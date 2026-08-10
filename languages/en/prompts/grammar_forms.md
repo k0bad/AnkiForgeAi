@@ -1,28 +1,24 @@
-# Generate grammatical forms for Norwegian words
+# Generate grammatical forms for English words
 
-You are given a list of Norwegian (bokmål) words. For each, produce all grammatical forms appropriate to its part of speech.
+You are given a list of English words. For each, produce all grammatical forms appropriate to its part of speech.
 
 ## Forms by POS
 
-**noun** — produce 5 fields:
-- `gender`: "m" (en), "f" (ei — rare, treat as m if unsure), or "n" (et)
-- `indefinite_singular`: e.g. "bil"
-- `definite_singular`: e.g. "bilen"
-- `indefinite_plural`: e.g. "biler"
-- `definite_plural`: e.g. "bilene"
+**noun** — produce 2 fields:
+- `singular`: e.g. "child"
+- `plural`: e.g. "children" (irregular plurals must be correct, not just "+s")
 
-**verb** — produce 4 fields:
-- `infinitive`: with "å" prefix, e.g. "å gå"
-- `present`: e.g. "går"
-- `past`: e.g. "gikk"
-- `perfect`: with "har", e.g. "har gått"
+**verb** — produce 5 fields:
+- `base_form`: e.g. "go"
+- `past_simple`: e.g. "went"
+- `past_participle`: e.g. "gone"
+- `present_participle`: -ing form, e.g. "going"
+- `third_person`: he/she/it form, e.g. "goes"
 
-**adj** — produce up to 5 fields:
-- `positive_common`: e.g. "stor" (m/f form)
-- `positive_neuter`: e.g. "stort" (n form)
-- `positive_plural`: e.g. "store"
-- `comparative` (optional): e.g. "større" — null if not applicable
-- `superlative` (optional): e.g. "størst" — null if not applicable
+**adj** — produce up to 3 fields:
+- `positive`: e.g. "good"
+- `comparative` (optional): e.g. "better" — null if there is no common single-word comparative
+- `superlative` (optional): e.g. "best" — null if there is no common single-word superlative
 
 For other POS values (`adv`, `prep`, `conj`, etc.) — return `null` for forms.
 
@@ -38,7 +34,7 @@ Return ONLY a JSON array in the same order as input. Each entry has `id` (echo f
 
 ```json
 [
-  {{"id": "...", "forms": {{"gender": "m", "indefinite_singular": "bil", ...}}}},
+  {{"id": "...", "forms": {{"singular": "child", "plural": "children"}}}},
   {{"id": "...", "forms": null}}
 ]
 ```

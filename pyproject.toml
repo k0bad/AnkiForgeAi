@@ -23,6 +23,8 @@ dependencies = [
     "openai>=1.30",
     # Dedup
     "rapidfuzz>=3.9",
+    # Retry/backoff for network calls
+    "tenacity>=8.2",
     # Media
     "edge-tts>=6.1",
     "Pillow>=10.3",
@@ -36,6 +38,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.5",
     "mypy>=1.10",
+    "types-PyYAML>=6.0",
 ]
 
 [project.scripts]
@@ -54,3 +57,11 @@ select = ["E", "F", "I", "N", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+no_implicit_optional = true

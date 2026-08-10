@@ -13,7 +13,23 @@ import json
 import os
 from typing import Any
 
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
+
 from .config import Config, get_config, get_secrets
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """Ретраить сетевые/API-ошибки провайдера, но не наши ValueError/RuntimeError
+    (невалидный ключ, невалидный JSON) — повторный вызов их не исправит."""
+    return not isinstance(exc, (RuntimeError, ValueError))
+
+
+_llm_retry = retry(
+    retry=retry_if_exception(_is_transient),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    reraise=True,
+)
 
 
 def _client_openai(cfg: Config) -> Any:
@@ -55,7 +71,7 @@ def load_prompt(name: str, **kwargs: Any) -> str:
 
     # Сначала пытаемся загрузить из языковой папки
     try:
-        lang = get_language()
+        lang = get_language(cfg.language)
         lang_path = lang.prompts_dir / f"{name}.md"
         if lang_path.exists():
             path = lang_path
@@ -98,6 +114,7 @@ async def call_json(prompt: str, cfg: Config | None = None) -> Any:
 # ───────────── Anthropic ─────────────
 
 
+@_llm_retry
 async def _call_anthropic(prompt: str, cfg: Config) -> str:
     from anthropic.types import TextBlock
 
@@ -115,6 +132,7 @@ async def _call_anthropic(prompt: str, cfg: Config) -> str:
 # ───────────── OpenAI / OpenRouter ─────────────
 
 
+@_llm_retry
 async def _call_openai(prompt: str, cfg: Config) -> str:
     client = _client_openai(cfg)
 

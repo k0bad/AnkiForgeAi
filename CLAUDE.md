@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**AnkiCards** — Norwegian (bokmål) vocabulary pipeline: ingest words → enrich with grammar → generate media → push to Anki.
+**AnkiForgeAI** (package `ankicards`) — multilingual vocabulary pipeline: ingest words → enrich with grammar → generate media → push to Anki. Target language is configurable via `language:` in `config.yaml` and `languages/{code}/language.yaml` profiles (built-in: `nb` Norwegian Bokmål, `de` German, `en` English, `es` Spanish — see `languages/`).
 
-Primary workflow: user speaks Russian in VS Code chat, Claude invokes CLI commands and shows results. Example: «сгенерируй 20 слов по теме одежда A2» → `ankicards ingest topic "одежда" --count 20 --level A2`.
+Primary workflow: user speaks Russian in VS Code chat, Claude invokes CLI commands and shows results. Example: «сгенерируй 20 слов по теме одежда A2» → `ankiforgeai ingest topic "одежда" --count 20 --level A2`.
 
 ## Commands
 
@@ -14,17 +14,20 @@ Primary workflow: user speaks Russian in VS Code chat, Claude invokes CLI comman
 # Install
 uv pip install -e ".[dev]"
 
-# CLI entry point
-ankicards ingest topic "еда" --count 20 --level A2
-ankicards ingest url https://...
-ankicards review
-ankicards push
-ankicards sync
-ankicards stats
+# CLI entry point (script name is `ankiforgeai`, package/import name is `ankicards`)
+ankiforgeai ingest topic "еда" --count 20 --level A2
+ankiforgeai ingest url https://...
+ankiforgeai review
+ankiforgeai push
+ankiforgeai sync
+ankiforgeai stats
+ankiforgeai setup           # interactive wizard: pick language, provider, Anki URL → writes config.yaml
 
 # One-time setup (run after install)
 python scripts/init_db.py           # create SQLite schema
-python scripts/setup_anki_notetype.py  # create NorskCard note type in Anki
+python scripts/setup_anki_notetype.py  # create the LanguageCard note type in Anki
+                                        # (name comes from languages/{language}/language.yaml anki.note_type,
+                                        #  must match anki.note_type in config.yaml)
 
 # Dev
 ruff check src/
@@ -79,21 +82,24 @@ Review can interrupt at any stage — user sees pending/review cards and accepts
 
 1. **Source of truth is Anki**, not SQLite. SQLite is staging + audit + dedup cache.
 2. **Card ID** is stored in the Anki note field `ID` and in `anki_note_id` in SQLite.
-3. **All LLM calls via Claude API** (`anthropic` SDK). No local models.
-4. **Prompts in `prompts/*.md`** — edit them to improve card quality without touching Python.
+3. **All LLM calls go through `llm.py`**, provider selected by `llm.provider` in `config.yaml`: `openrouter` (OpenAI-compatible SDK, default) or `anthropic` (Claude SDK). No local models.
+4. **Prompts in `languages/{code}/prompts/*.md`**, falling back to top-level `prompts/*.md` — edit them to improve card quality without touching Python. No hardcoded per-language prompt text in Python (see `enrich/translation.py` for the pattern).
 5. **All DB operations in transactions** via `Database.connect()` context manager.
-6. **Media filenames are deterministic**: `{card.id}_nb.mp3`, `{card.id}.jpg`. Store filename only, not path.
-7. **bokmål only**. Nynorsk not supported.
+6. **Media filenames are deterministic**: `{card.id}_nb.mp3`, `{card.id}.jpg` (the `_nb` suffix is legacy and not language-specific). Store filename only, not path.
+7. **Target language is per-profile**, not hardcoded. Currently `nb`/`de`/`en`/`es`; Nynorsk not supported within `nb`.
 
 ## Config
 
 `config.yaml` is the main config; `.env` holds secrets (see `.env.example`).
 
 Key settings to know:
-- `llm.model`: `claude-sonnet-4-5-20250929` (change here to upgrade model)
+- `language: nb` — active language profile, must match a `languages/{code}/` directory
+- `ui_language: ru` — back-of-card label language (`ru` or `en`; see `config.EN_BACK_LABELS`)
+- `llm.provider` / `llm.model`: default is `openrouter` / `deepseek/deepseek-v4-flash`; set `provider: anthropic` + a `claude-*` model to use Claude instead
 - `dedupe.fuzzy_threshold_review: 85` — score ≥ 85 → mandatory review; 70–84 → semiauto
-- `tts.voice_female: nb-NO-PernilleNeural` / `tts.voice_male: nb-NO-FinnNeural`
+- `tts.voice_female` / `tts.voice_male` — come from the active language profile by default (`languages/{code}/language.yaml` → `tts:`); override in `config.yaml` to pin a different voice
 - `images.only_for_pos: [noun]` — images generated only for nouns
+- `enrich.grammar` / `enrich.examples` / `enrich.pronunciation` — toggle individual enrichment stages (set by `ankiforgeai setup`)
 
 ## Code conventions
 

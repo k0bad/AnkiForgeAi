@@ -1,28 +1,34 @@
-# Generate grammatical forms for Norwegian words
+# Generate grammatical forms for Spanish words
 
-You are given a list of Norwegian (bokmål) words. For each, produce all grammatical forms appropriate to its part of speech.
+You are given a list of Spanish words. For each, produce all grammatical forms appropriate to its part of speech.
 
 ## Forms by POS
 
-**noun** — produce 5 fields:
-- `gender`: "m" (en), "f" (ei — rare, treat as m if unsure), or "n" (et)
-- `indefinite_singular`: e.g. "bil"
-- `definite_singular`: e.g. "bilen"
-- `indefinite_plural`: e.g. "biler"
-- `definite_plural`: e.g. "bilene"
+**noun** — produce 3 fields:
+- `gender`: "m" or "f"
+- `singular`: e.g. "casa"
+- `plural`: e.g. "casas"
 
-**verb** — produce 4 fields:
-- `infinitive`: with "å" prefix, e.g. "å gå"
-- `present`: e.g. "går"
-- `past`: e.g. "gikk"
-- `perfect`: with "har", e.g. "har gått"
+**verb** — produce 12 fields (correct conjugation, including irregulars):
+- `infinitive`: e.g. "hablar"
+- `present_yo`: e.g. "hablo"
+- `present_tu`: e.g. "hablas"
+- `present_el`: él/ella/usted form, e.g. "habla"
+- `present_nosotros`: e.g. "hablamos"
+- `present_ellos`: ellos/ustedes form, e.g. "hablan"
+- `preterite_yo`: e.g. "hablé"
+- `preterite_el`: e.g. "habló"
+- `imperfect_yo`: e.g. "hablaba"
+- `future_yo`: e.g. "hablaré"
+- `participle`: e.g. "hablado"
+- `gerund`: e.g. "hablando"
 
-**adj** — produce up to 5 fields:
-- `positive_common`: e.g. "stor" (m/f form)
-- `positive_neuter`: e.g. "stort" (n form)
-- `positive_plural`: e.g. "store"
-- `comparative` (optional): e.g. "større" — null if not applicable
-- `superlative` (optional): e.g. "størst" — null if not applicable
+**adj** — produce 4 fields:
+- `masculine_singular`: e.g. "bueno"
+- `feminine_singular`: e.g. "buena"
+- `masculine_plural`: e.g. "buenos"
+- `feminine_plural`: e.g. "buenas"
+(if the adjective has one common form for both genders, e.g. "grande", repeat it in all four fields)
 
 For other POS values (`adv`, `prep`, `conj`, etc.) — return `null` for forms.
 
@@ -38,7 +44,7 @@ Return ONLY a JSON array in the same order as input. Each entry has `id` (echo f
 
 ```json
 [
-  {{"id": "...", "forms": {{"gender": "m", "indefinite_singular": "bil", ...}}}},
+  {{"id": "...", "forms": {{"gender": "f", "singular": "casa", "plural": "casas"}}}},
   {{"id": "...", "forms": null}}
 ]
 ```

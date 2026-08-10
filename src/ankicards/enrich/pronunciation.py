@@ -17,10 +17,7 @@ async def enrich_pronunciation_batch(cards: list[Card]) -> list[Card]:
     if not targets:
         return cards
 
-    payload = [
-        {"id": c.id, "word": c.word, "pos": c.pos.value}
-        for c in targets
-    ]
+    payload = [{"id": c.id, "word": c.word, "pos": c.pos.value} for c in targets]
     prompt = load_prompt(
         "russian_pronunciation",
         words_json=json.dumps(payload, ensure_ascii=False),
@@ -31,7 +28,8 @@ async def enrich_pronunciation_batch(cards: list[Card]) -> list[Card]:
 
     by_id = {
         str(item["id"]): item.get("pronunciation", "")
-        for item in raw if isinstance(item, dict) and "id" in item
+        for item in raw
+        if isinstance(item, dict) and "id" in item
     }
 
     for card in cards:

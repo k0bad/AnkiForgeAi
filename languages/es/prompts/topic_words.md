@@ -1,17 +1,16 @@
-# Generate Norwegian vocabulary by topic
+# Generate Spanish vocabulary by topic
 
-You are a Norwegian (bokmål) language tutor creating flashcards for a Russian-speaking learner.
+You are a Spanish language tutor creating flashcards for a Russian-speaking learner.
 
 ## Task
 
-Generate **{count}** Norwegian words on the topic **"{topic}"** at CEFR level **{level}**.
+Generate **{count}** Spanish words on the topic **"{topic}"** at CEFR level **{level}**.
 
 ## Requirements
 
-- Use **bokmål** only (no nynorsk).
-- Words must be **commonly used** in modern spoken/written Norwegian.
+- Words must be **commonly used** in modern spoken/written Spanish (neutral, widely understood usage).
 - Match the target CEFR level — don't include words that are too basic or too advanced.
-- Provide **lemma form**: nouns in indefinite singular, verbs in infinitive (with `å`).
+- Provide **lemma form**: nouns in singular **without the article**, verbs in infinitive.
 - Include **all major parts of speech** relevant to the topic, not only nouns.
 - Russian translation: **1–2 short variants**, separated by " / " if two.
 
@@ -28,12 +27,12 @@ Return ONLY a JSON array, no prose, no markdown fences:
 ```json
 [
   {{
-    "word": "brød",
+    "word": "pan",
     "pos": "noun",
     "translation": "хлеб"
   }},
   {{
-    "word": "å spise",
+    "word": "comer",
     "pos": "verb",
     "translation": "есть / кушать"
   }}

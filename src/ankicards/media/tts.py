@@ -14,7 +14,7 @@ from pathlib import Path
 
 import edge_tts
 
-from ..config import Config
+from ..config import Config, get_language
 from ..models import POS, Card
 
 
@@ -27,9 +27,13 @@ def _pronounceable_text(card: Card) -> str:
 
 
 def _voice_for(cfg: Config) -> str:
-    if cfg.tts.default_voice.lower() == "male":
-        return cfg.tts.voice_male
-    return cfg.tts.voice_female
+    """Голос TTS: сначала из языкового профиля (languages/{code}/language.yaml),
+    cfg.tts — как fallback для языков без своих голосов в профиле."""
+    lang_tts = get_language(cfg.language).tts
+    default_voice = (lang_tts.get("default_voice") or cfg.tts.default_voice).lower()
+    if default_voice == "male":
+        return lang_tts.get("voice_male") or cfg.tts.voice_male
+    return lang_tts.get("voice_female") or cfg.tts.voice_female
 
 
 async def generate_audio(card: Card, cfg: Config) -> Card:

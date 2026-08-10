@@ -3,17 +3,24 @@
 Читает data/topic_schedule.yaml, выбирает тему для сегодняшнего дня
 и запускает полный пайплайн ingest (LLM → enrich → dedupe → save).
 
-ПОЛНЫЙ АВТОМАТИЧЕСКИЙ ЦИКЛ:
+Этот скрипт сам по себе выполняет шаги 1-4 и печатает отчёт в stdout.
+Шаг 5 (уведомление в Telegram) он НЕ отправляет — это делает обёртка
+scripts/daily_topic.sh, которая перехватывает stdout этого скрипта и
+шлёт его в n8n webhook. Если запускать daily_topic.py напрямую (не
+через .sh), уведомление в Telegram отправлено не будет.
+
+ПОЛНЫЙ АВТОМАТИЧЕСКИЙ ЦИКЛ (daily_topic.sh):
 1. Генерация слов по теме
 2. Dedupe + enrich + media
 3. Авто-принятие всех review-карточек → approved
 4. Авто-push в Anki (если AnkiConnect доступен)
-5. Уведомление в Telegram (через n8n webhook)
+5. Уведомление в Telegram (через n8n webhook) — только из .sh-обёртки
 
 Использование:
-    uv run python scripts/daily_topic.py             # тема по дню недели
+    uv run python scripts/daily_topic.py             # тема по дню недели, без Telegram
     uv run python scripts/daily_topic.py --dry-run   # показать, что бы сгенерировало
     uv run python scripts/daily_topic.py --topic dyr --count 5   # переопределить
+    ./scripts/daily_topic.sh                          # полный цикл + Telegram (для cron)
 """
 from __future__ import annotations
 
