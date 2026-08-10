@@ -146,23 +146,29 @@ def _render_forms_html(pos_value: str, forms: dict | None) -> str:
 
 
 def card_to_anki_fields(card: Card) -> dict[str, str]:
-    """Конвертировать Card → словарь полей для AnkiConnect addNote."""
+    """Конвертировать Card → словарь полей для AnkiConnect addNote.
+
+    Текстовые поля экранируются: Anki рендерит {{Field}} как сырой HTML в
+    webview, а значения (word/translation/example) могут в итоге восходить
+    к LLM-обработке чужого веб-контента (ingest url) — без escape() это был
+    бы вектор stored-HTML/JS-инъекции в карточку.
+    """
     audio_field = f"[sound:{card.audio}]" if card.audio else ""
     image_field = f'<img src="{escape(card.image)}">' if card.image else ""
     forms_html = _render_forms_html(card.pos.value, card.forms)
     pos_display = pos_label(card.pos.value) if card.pos else ""
 
     return {
-        "Word": card.word,
-        "Pronunciation": card.pronunciation or "",
-        "Translation": card.translation,
-        "Example": card.example or "",
-        "ExampleTranslation": card.example_translation or "",
-        "POS": pos_display,
+        "Word": escape(card.word),
+        "Pronunciation": escape(card.pronunciation or ""),
+        "Translation": escape(card.translation),
+        "Example": escape(card.example or ""),
+        "ExampleTranslation": escape(card.example_translation or ""),
+        "POS": escape(pos_display),
         "Forms": forms_html,
         "Image": image_field,
         "Audio": audio_field,
-        "Level": card.level.value.upper() if card.level else "",
-        "Topic": card.topic or "",
+        "Level": escape(card.level.value.upper() if card.level else ""),
+        "Topic": escape(card.topic or ""),
         "ID": card.id,
     }
