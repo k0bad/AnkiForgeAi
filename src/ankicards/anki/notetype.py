@@ -42,13 +42,13 @@ CSS = """.card {
 .word { font-size: 36px; font-weight: 700; text-align: center; margin: 40px 0 8px; }
 .pronunciation { text-align: center; color: #888; font-size: 18px; font-style: italic; }
 .section { margin-bottom: 20px; }
-.label { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #999; margin-bottom: 4px; }
+.label { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #999; margin-bottom: 4px; }  # noqa: E501
 .translation { font-size: 26px; font-weight: 600; color: #2c5282; }
-.pos { font-size: 16px; color: #555; background: #e8e8e8; display: inline-block; padding: 2px 10px; border-radius: 4px; }
+.pos { font-size: 16px; color: #555; background: #e8e8e8; display: inline-block; padding: 2px 10px; border-radius: 4px; }  # noqa: E501
 .forms { margin: 8px 0; }
 .forms table { border-collapse: collapse; width: 100%; }
 .forms td { padding: 6px 12px; border-bottom: 1px solid #e2e8f0; font-size: 17px; }
-.forms td:first-child { color: #888; font-size: 13px; width: 120px; vertical-align: top; padding-top: 8px; }
+.forms td:first-child { color: #888; font-size: 13px; width: 120px; vertical-align: top; padding-top: 8px; }  # noqa: E501
 .forms tr:last-child td { border-bottom: none; }
 .example { font-style: italic; color: #2d3748; font-size: 18px; }
 .example-translation { color: #718096; font-size: 17px; }
@@ -56,7 +56,7 @@ CSS = """.card {
 .card-image { text-align: center; margin: 12px 0; }
 .card-image img { max-width: 280px; border-radius: 8px; }
 .tags { margin-top: 20px; font-size: 12px; color: #a0aec0; }
-.tag { display: inline-block; background: #edf2f7; padding: 1px 8px; border-radius: 3px; margin-right: 4px; }"""
+.tag { display: inline-block; background: #edf2f7; padding: 1px 8px; border-radius: 3px; margin-right: 4px; }"""  # noqa: E501
 
 FRONT_TEMPLATE = """<div class="word">{{Word}}</div>
 {{#Audio}}<div class="audio">{{Audio}}</div>{{/Audio}}
@@ -65,22 +65,22 @@ FRONT_TEMPLATE = """<div class="word">{{Word}}</div>
 
 def _build_back_template() -> str:
     """Динамически генерирует BACK_TEMPLATE из language.back_labels."""
-    L = get_language().back_labels
+    L = get_language().back_labels  # noqa: N806
     parts = [
         '<hr id=answer>',
-        f'<div class="section"><div class="label">{L.get("translation","Translation")}</div><div class="translation">{{{{Translation}}}}</div></div>',
-        f'<div class="section"><div class="label">{L.get("part_of_speech","Part of Speech")}</div><div class="pos">{{{{POS}}}}</div></div>',
+        f'<div class="section"><div class="label">{L.get("translation","Translation")}</div><div class="translation">{{{{Translation}}}}</div></div>',  # noqa: E501
+        f'<div class="section"><div class="label">{L.get("part_of_speech","Part of Speech")}</div><div class="pos">{{{{POS}}}}</div></div>',  # noqa: E501
         '{{#Pronunciation}}',
-        f'<div class="section"><div class="label">{L.get("pronunciation","Pronunciation")}</div><div class="pronunciation-ru">{{{{Pronunciation}}}}</div></div>',
+        f'<div class="section"><div class="label">{L.get("pronunciation","Pronunciation")}</div><div class="pronunciation-ru">{{{{Pronunciation}}}}</div></div>',  # noqa: E501
         '{{/Pronunciation}}',
         '{{#Forms}}',
-        f'<div class="section"><div class="label">{L.get("grammar","Grammar")}</div><div class="forms">{{{{Forms}}}}</div></div>',
+        f'<div class="section"><div class="label">{L.get("grammar","Grammar")}</div><div class="forms">{{{{Forms}}}}</div></div>',  # noqa: E501
         '{{/Forms}}',
         '{{#Example}}',
-        f'<div class="section"><div class="label">{L.get("example","Example")}</div><div class="example">{{{{Example}}}}</div></div>',
+        f'<div class="section"><div class="label">{L.get("example","Example")}</div><div class="example">{{{{Example}}}}</div></div>',  # noqa: E501
         '{{/Example}}',
         '{{#ExampleTranslation}}',
-        f'<div class="section"><div class="label">{L.get("example_translation","Example Translation")}</div><div class="example-translation">{{{{ExampleTranslation}}}}</div></div>',
+        f'<div class="section"><div class="label">{L.get("example_translation","Example Translation")}</div><div class="example-translation">{{{{ExampleTranslation}}}}</div></div>',  # noqa: E501
         '{{/ExampleTranslation}}',
         '<div class="tags">',
         '{{#Level}}<span class="tag">{{Level}}</span>{{/Level}}',

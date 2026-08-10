@@ -85,7 +85,7 @@ def run_setup() -> None:
     ).ask()
 
     if ui_lang == "en":
-        back_labels_en = {
+        _back_labels_en = {
             "translation": "Translation",
             "part_of_speech": "Part of Speech",
             "grammar": "Grammar",
@@ -96,7 +96,7 @@ def run_setup() -> None:
             "topic": "Topic",
         }
     else:
-        back_labels_en = meta.get("back_labels", {})
+        back_labels_en = meta.get("back_labels", {})  # noqa: F841
 
     console.print(f"[green]✓[/] Card labels: {'English' if ui_lang == 'en' else 'Russian'}")
 
@@ -104,9 +104,9 @@ def run_setup() -> None:
     console.print()
     console.print("[cyan]What to show on flashcards?[/]")
     show_image = questionary.confirm("Show images (Unsplash) for nouns?", default=True).ask()
-    show_grammar = questionary.confirm("Show grammar table on back?", default=True).ask()
-    show_examples = questionary.confirm("Show example sentences?", default=True).ask()
-    show_pronunciation = questionary.confirm("Show pronunciation hints?", default=True).ask()
+    _show_grammar = questionary.confirm("Show grammar table on back?", default=True).ask()
+    _show_examples = questionary.confirm("Show example sentences?", default=True).ask()
+    _show_pronunciation = questionary.confirm("Show pronunciation hints?", default=True).ask()
     auto_accept = questionary.confirm(
         "Auto-accept words without manual review? (recommended for daily cron)",
         default=True,
@@ -120,12 +120,17 @@ def run_setup() -> None:
     provider = questionary.select(
         "Which LLM provider?",
         choices=[
-            questionary.Choice("OpenRouter (recommended, works with many models)", value="openrouter"),
+            questionary.Choice(
+                "OpenRouter (recommended, many models)", value="openrouter"
+            ),
             questionary.Choice("Anthropic Claude", value="anthropic"),
         ],
     ).ask()
 
-    default_model = "deepseek/deepseek-v4-flash" if provider == "openrouter" else "claude-sonnet-4-5-20250929"
+    if provider == "openrouter":
+        default_model = "deepseek/deepseek-v4-flash"
+    else:
+        default_model = "claude-sonnet-4-5-20250929"
     model = questionary.text("Model name:", default=default_model).ask()
 
     # ─── 5. Anki connection ───
