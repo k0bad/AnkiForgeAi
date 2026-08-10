@@ -48,6 +48,14 @@ console = Console()
 
 
 @app.command()
+def setup() -> None:
+    """Интерактивный мастер первичной настройки."""
+    from .setup_wizard import run_setup
+
+    run_setup()
+
+
+@app.command()
 def init() -> None:
     """Создать БД и Note Type в Anki."""
     cfg = get_config()
