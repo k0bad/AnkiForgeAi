@@ -2,7 +2,8 @@
 # Ежедневная генерация слов по расписанию тем (для cron).
 # Полный автоматический цикл: генерация → авто-принятие → push в Anki → Telegram
 set -euo pipefail
-cd /opt/data/projects/Anki
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
 
 # 1. Generate + auto-accept + auto-push
 OUTPUT=$(.venv/bin/python scripts/daily_topic.py 2>&1)
