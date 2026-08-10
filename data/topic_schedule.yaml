@@ -1,0 +1,48 @@
+# Расписание тем для ежедневной генерации слов в AnkiCards (cron).
+# Каждый день недели — своя тема. Ключ дня — английское название (monday..sunday).
+# topic передаётся в `ankicards ingest topic "<topic>"`.
+# count / level — параметры генерации для этого дня (перекрывают defaults из config.yaml).
+
+schedule:
+  monday:
+    topic: mat
+    label: Еда
+    count: 10
+    level: A2
+  tuesday:
+    topic: dyr
+    label: Животные
+    count: 10
+    level: A2
+  wednesday:
+    topic: familie
+    label: Семья
+    count: 10
+    level: A2
+  thursday:
+    topic: reise
+    label: Путешествия
+    count: 10
+    level: A2
+  friday:
+    topic: arbeid
+    label: Работа
+    count: 10
+    level: A2
+  saturday:
+    topic: klær
+    label: Одежда
+    count: 10
+    level: A2
+  sunday:
+    topic: hus
+    label: Дом
+    count: 10
+    level: A2
+
+# ежедневный дефолт, если день отсутствует в расписании
+default:
+  topic: generelt
+  label: Общие слова
+  count: 10
+  level: A2

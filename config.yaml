@@ -1,0 +1,80 @@
+# Конфигурация AnkiCards
+# Все пути относительные от корня проекта, если не указано иное
+
+paths:
+  db: data/ankicards.db
+  logs_dir: data/logs
+  audio_dir: media/audio
+  images_dir: media/images
+  prompts_dir: prompts
+
+anki:
+  # AnkiConnect должен быть запущен (Anki desktop + addon 2055492159)
+  url: http://127.0.0.1:8765   # заменить на IP твоего Anki (напр. http://100.84.155.42:8765 через Tailscale)
+  deck_name: Norsk
+  note_type: NorskCard          # будет создан скриптом setup_anki_notetype.py
+  # Имена медиа-файлов: {ID}_nb.mp3 и {ID}.jpg
+  # AnkiConnect копирует их в collection.media при push
+
+dedupe:
+  # Пороги сходства (rapidfuzz, 0-100)
+  exact_match_field: Word        # точное совпадение по этому полю → merge
+  fuzzy_threshold_review: 85     # >= 85 → обязательный ревью
+  fuzzy_threshold_auto: 82       # 82-84 → полуавтомат
+  # < 82 → автодобавление в режиме auto
+  compare_fields: [Word, Translation]
+
+ingest:
+  # Парсинг URL
+  url_max_size_mb: 5
+  url_timeout_seconds: 30
+  # Генерация по теме
+  default_count: 20
+  default_level: A2              # CEFR: A1, A2, B1, B2, C1, C2
+
+llm:
+  # Провайдер: "anthropic" (Claude) или "openrouter" (OpenAI-совместимые)
+  provider: openrouter
+  # Модель у провайдера
+  model: deepseek/deepseek-v4-flash
+  base_url: https://openrouter.ai/api/v1
+  max_tokens: 4096
+  temperature: 0.3               # ниже = стабильнее для словарных задач
+  # Промпты лежат в prompts/, перезагружаются при каждом вызове
+  # (удобно итерировать без рестарта)
+
+tts:
+  # edge-tts голоса для bokmål
+  voice_male: nb-NO-FinnNeural
+  voice_female: nb-NO-PernilleNeural
+  default_voice: female
+  rate: "+0%"                    # скорость: -50% .. +100%
+  pitch: "+0Hz"
+
+images:
+  # Unsplash API (опционально, можно отключить)
+  enabled: true
+  per_page: 5                    # сколько вариантов показывать на ревью
+  # Качаем только для конкретных существительных (не абстрактных)
+  only_for_pos: [noun]
+  max_size_kb: 500
+  resize_to: [600, 600]          # max ширина/высота
+
+review:
+  # Режим работы по умолчанию: manual / semiauto / auto
+  mode: semiauto
+  # В semiauto: автоматически коммитить кандидатов с score < fuzzy_threshold_auto
+  auto_accept_below_score: true
+
+logging:
+  level: INFO                    # DEBUG / INFO / WARNING / ERROR
+  json_logs: true                # дублировать в JSON для машинной обработки
+  human_logs: true               # человекочитаемый формат в stdout
+
+tags:
+  # Иерархические теги Anki (синтаксис ::)
+  # Применяются автоматически на основе метаданных карточки
+  topic_prefix: "topic"          # → topic::mat
+  level_prefix: "level"          # → level::a2
+  pos_prefix: "pos"              # → pos::noun
+  source_prefix: "source"        # → source::nrk

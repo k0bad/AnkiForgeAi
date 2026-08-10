@@ -1,0 +1,70 @@
+# Языковой профиль: Norwegian Bokmål
+# languages/nb/language.yaml — единственный источник истины для языка.
+# Все модули (notetype, grammar, enrichment, TTS) читают этот файл.
+# Никакого хардкода под конкретный язык в коде.
+
+code: nb
+name: Norwegian Bokmål
+
+# Артикли: true если у существительных есть артикли (en/ei/et, der/die/das, le/la)
+article: true
+
+# Названия частей речи на ЦЕЛЕВОМ языке (отображаются на фронте карточки)
+pos_labels:
+  noun: substantiv
+  verb: verb
+  adj: adjektiv
+  adv: adverb
+  pron: pronomen
+  prep: preposisjon
+  conj: konjunksjon
+  interj: interjeksjon
+  num: tallord
+  phrase: frase / uttrykk
+  other: annet
+
+# Схема грамматических форм для каждой POS.
+# Каждый элемент: {key: имя_поля_в_JSON, label: читаемое_название}
+# key используется в card.forms как ключ dict.
+# label — как подпись в таблице на бэк-стороне карточки.
+forms:
+  noun:
+    - {key: gender, label: Род}
+    - {key: indefinite_singular, label: Неопр. ед. ч.}
+    - {key: definite_singular, label: Опр. ед. ч.}
+    - {key: indefinite_plural, label: Неопр. мн. ч.}
+    - {key: definite_plural, label: Опр. мн. ч.}
+  verb:
+    - {key: infinitive, label: Инфинитив}
+    - {key: present, label: Настоящее время}
+    - {key: past, label: Прошедшее время}
+    - {key: perfect, label: Перфект}
+  adj:
+    - {key: positive_common, label: Общая форма (m/f)}
+    - {key: positive_neuter, label: Форма для ett (n)}
+    - {key: positive_plural, label: Множественное число}
+    - {key: comparative, label: Сравнительная степень}
+    - {key: superlative, label: Превосходная степень}
+
+# edge-tts голоса для этого языка
+tts:
+  voice_female: nb-NO-PernilleNeural
+  voice_male: nb-NO-FinnNeural
+  default_voice: female
+
+# Настройки Anki для этого языка
+anki:
+  deck_name: Norsk
+  note_type: LanguageCard    # универсальное имя Note Type — не NorskCard
+
+# Переводы label'ов на бэк-стороне карточки (язык пользователя)
+# Эти надписи видны на оборотной стороне карточки в Anki
+back_labels:
+  translation: Перевод
+  part_of_speech: Часть речи
+  grammar: Грамматика
+  example: Пример
+  example_translation: Перевод примера
+  pronunciation: Транскрипция
+  level: Уровень
+  topic: Тема
