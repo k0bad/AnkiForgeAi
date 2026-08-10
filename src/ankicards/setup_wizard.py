@@ -21,7 +21,6 @@ from rich.panel import Panel
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LANGUAGES_DIR = PROJECT_ROOT / "languages"
 CONFIG_PATH = PROJECT_ROOT / "config.yaml"
-CONFIG_EXAMPLE_PATH = PROJECT_ROOT / "config.yaml"
 
 console = Console()
 
@@ -84,29 +83,17 @@ def run_setup() -> None:
         ],
     ).ask()
 
-    if ui_lang == "en":
-        _back_labels_en = {
-            "translation": "Translation",
-            "part_of_speech": "Part of Speech",
-            "grammar": "Grammar",
-            "example": "Example",
-            "example_translation": "Example Translation",
-            "pronunciation": "Pronunciation",
-            "level": "Level",
-            "topic": "Topic",
-        }
-    else:
-        back_labels_en = meta.get("back_labels", {})  # noqa: F841
-
     console.print(f"[green]✓[/] Card labels: {'English' if ui_lang == 'en' else 'Russian'}")
 
     # ─── 3. Card content preferences ───
     console.print()
     console.print("[cyan]What to show on flashcards?[/]")
     show_image = questionary.confirm("Show images (Unsplash) for nouns?", default=True).ask()
-    _show_grammar = questionary.confirm("Show grammar table on back?", default=True).ask()
-    _show_examples = questionary.confirm("Show example sentences?", default=True).ask()
-    _show_pronunciation = questionary.confirm("Show pronunciation hints?", default=True).ask()
+    show_grammar = questionary.confirm("Show grammar table on back?", default=True).ask()
+    show_examples = questionary.confirm("Show example sentences?", default=True).ask()
+    show_pronunciation = questionary.confirm(
+        "Show pronunciation hints?", default=True
+    ).ask()
     auto_accept = questionary.confirm(
         "Auto-accept words without manual review? (recommended for daily cron)",
         default=True,
@@ -143,6 +130,8 @@ def run_setup() -> None:
 
     # ─── 6. Build config ───
     config = {
+        "language": target,
+        "ui_language": ui_lang,
         "paths": {
             "db": "data/ankicards.db",
             "logs_dir": "data/logs",
@@ -153,7 +142,7 @@ def run_setup() -> None:
         "anki": {
             "url": anki_url,
             "deck_name": meta["anki"]["deck_name"],
-            "note_type": "LanguageCard",
+            "note_type": meta["anki"].get("note_type", "LanguageCard"),
         },
         "dedupe": {
             "exact_match_field": "Word",
@@ -191,6 +180,11 @@ def run_setup() -> None:
         "review": {
             "mode": "auto" if auto_accept else "semiauto",
             "auto_accept_below_score": auto_accept,
+        },
+        "enrich": {
+            "grammar": show_grammar,
+            "examples": show_examples,
+            "pronunciation": show_pronunciation,
         },
         "logging": {
             "level": "INFO",

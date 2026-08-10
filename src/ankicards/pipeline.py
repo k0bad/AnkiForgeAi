@@ -70,12 +70,15 @@ async def run_ingest_pipeline(
     if auto_enrich and accepted:
         try:
             # Сначала транскрипция, потом перевод, грамматика и примеры
-            await enrich_pronunciation_batch(accepted)
+            if cfg.enrich.pronunciation:
+                await enrich_pronunciation_batch(accepted)
             for card in accepted:
                 if not card.translation:
                     await enrich_translation(card)
-            await enrich_grammar_batch(accepted)
-            await enrich_example_batch(accepted)
+            if cfg.enrich.grammar:
+                await enrich_grammar_batch(accepted)
+            if cfg.enrich.examples:
+                await enrich_example_batch(accepted)
             stats["enriched"] = len(accepted)
         except Exception as e:
             stats["errors"] += 1

@@ -12,12 +12,17 @@ from __future__ import annotations
 
 from html import escape
 
-from ..config import get_language
+from ..config import EN_BACK_LABELS, LanguageConfig, get_config, get_language
 from ..models import Card
 
 
+def _current_language() -> LanguageConfig:
+    """Языковой профиль, выбранный в config.yaml (language: ...)."""
+    return get_language(get_config().language)
+
+
 def _get_note_type_name() -> str:
-    return get_language().anki.get("note_type", "LanguageCard")
+    return _current_language().anki.get("note_type", "LanguageCard")
 
 
 NOTE_TYPE_NAME_PROP = property(lambda self: _get_note_type_name())  # псевдо-константа
@@ -63,9 +68,16 @@ FRONT_TEMPLATE = """<div class="word">{{Word}}</div>
 {{#Image}}<div class="card-image">{{Image}}</div>{{/Image}}"""
 
 
+def _back_labels() -> dict[str, str]:
+    """Подписи бэк-стороны: EN_BACK_LABELS если cfg.ui_language == "en", иначе из language.yaml."""
+    if get_config().ui_language == "en":
+        return EN_BACK_LABELS
+    return _current_language().back_labels
+
+
 def _build_back_template() -> str:
     """Динамически генерирует BACK_TEMPLATE из language.back_labels."""
-    L = get_language().back_labels  # noqa: N806
+    L = _back_labels()  # noqa: N806
     parts = [
         '<hr id=answer>',
         f'<div class="section"><div class="label">{L.get("translation","Translation")}</div><div class="translation">{{{{Translation}}}}</div></div>',  # noqa: E501
@@ -96,7 +108,7 @@ def back_template() -> str:
 
 def pos_label(pos_value: str) -> str:
     """Название части речи на целевом языке (из language.yaml)."""
-    lang = get_language()
+    lang = _current_language()
     return lang.pos_labels.get(pos_value, pos_value)
 
 
@@ -116,7 +128,7 @@ def _resolve_gender(gender_value: str | None) -> str:
     """Перевести код рода (m/f/n) в читаемую строку."""
     if not gender_value:
         return ""
-    code = get_language().code
+    code = _current_language().code
     return _GENDER_MAPS.get(code, {}).get(str(gender_value), str(gender_value))
 
 
@@ -125,7 +137,7 @@ def _render_forms_html(pos_value: str, forms: dict | None) -> str:
     if not forms:
         return ""
 
-    lang = get_language()
+    lang = _current_language()
     schema = lang.forms.get(str(pos_value), [])
     if not schema:
         return ""
