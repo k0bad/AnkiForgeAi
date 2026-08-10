@@ -19,6 +19,7 @@ from typing import Any
 
 import httpx
 
+from .._net import http_retry
 from ..config import Config
 
 ANKI_CONNECT_VERSION = 6
@@ -38,14 +39,18 @@ class AnkiConnect:
         self.note_type = cfg.anki.note_type
         self._timeout = timeout
 
+    @http_retry
+    async def _post(self, payload: dict[str, Any]) -> Any:
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.post(self.url, json=payload)
+            response.raise_for_status()
+            return response.json()
+
     async def _call(self, action: str, **params: Any) -> Any:
         """Вызвать AnkiConnect action и вернуть result."""
         payload = {"action": action, "version": ANKI_CONNECT_VERSION, "params": params}
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.post(self.url, json=payload)
-                response.raise_for_status()
-                data = response.json()
+            data = await self._post(payload)
         except httpx.HTTPError as e:
             raise AnkiConnectError(f"HTTP error calling {action}: {e}") from e
 

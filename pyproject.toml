@@ -23,6 +23,8 @@ dependencies = [
     "openai>=1.30",
     # Dedup
     "rapidfuzz>=3.9",
+    # Retry/backoff for network calls
+    "tenacity>=8.2",
     # Media
     "edge-tts>=6.1",
     "Pillow>=10.3",
