@@ -8,17 +8,16 @@
 ## 1. Быстрый старт для AI-агента
 
 ```bash
-# Установка
-cd /opt/data/projects/Anki
+# Установка (после клонирования репозитория)
 uv pip install -e ".[dev]"
 
-# CLI
-ankicards ingest topic "еда" --count 10 --level A2   # генерация слов
-ankicards ingest url https://...                       # извлечение из страницы
-ankicards review                                        # интерактивный ревью (только в TTY)
-ankicards push                                          # отправка в Anki
-ankicards sync                                          # синхронизация Anki → кэш
-ankicards stats                                         # статистика
+# CLI (команда — ankiforgeai, пакет/import-имя — ankicards)
+ankiforgeai ingest topic "еда" --count 10 --level A2   # генерация слов
+ankiforgeai ingest url https://...                       # извлечение из страницы
+ankiforgeai review                                        # интерактивный ревью (только в TTY)
+ankiforgeai push                                          # отправка в Anki
+ankiforgeai sync                                          # синхронизация Anki → кэш
+ankiforgeai stats                                         # статистика
 
 # Тесты + линтеры
 pytest tests/ -v
@@ -28,7 +27,8 @@ mypy src/
 
 # Ежедневный cron (полный автоцикл)
 python scripts/daily_topic.py --dry-run                 # что бы сгенерировало
-python scripts/daily_topic.py                           # генерация + авто-принятие + push + уведомление
+python scripts/daily_topic.py                           # генерация + авто-принятие + push (БЕЗ Telegram)
+./scripts/daily_topic.sh                                 # то же + уведомление в Telegram через n8n
 python scripts/daily_topic.py --topic dyr --count 5     # другая тема вручную
 ```
 
@@ -120,8 +120,8 @@ languages/{code}/
 │     └─ status=pushed, anki_note_id заполнен                     │
 │                                                                 │
 │  8. NOTIFY (daily_topic.sh → n8n webhook → Telegram)            │
-│     └─ POST http://192.168.10.182:5678/webhook/ankicards-notify │
-│         → отформатированное сообщение → OS-бот (topic 115802)   │
+│     └─ POST http://<n8n-host>:5678/webhook/ankicards-notify     │
+│         → отформатированное сообщение → Telegram                │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -289,7 +289,7 @@ pytest tests/test_language.py -v
 
 ```
 Cron (Hermes) → daily_topic.sh
-  ├─ 1. python daily_topic.py → генерация + авто-принятие + push
+  ├─ 1. python scripts/daily_topic.py → генерация + авто-принятие + push
   ├─ 2. curl POST → n8n webhook (`$N8N_WEBHOOK_URL` или `http://<n8n-host>:5678/webhook/ankicards-notify`)
   └─ 3. n8n workflow "AnkiCards Send Notification"
        ├─ Webhook → Code: Prepare Message → HTTP Request (Telegram Bot API)
@@ -353,7 +353,7 @@ CREATE TABLE anki_cache (
 5. **Все операции с БД — в транзакциях** через `db.connect()`.
 6. **Имена медиа-файлов детерминированы:** `{card.id}_nb.mp3`, `{card.id}.jpg`.
 7. **Source of truth = Anki**, не SQLite. SQLite — staging + audit + кэш.
-8. **Только bokmål** (на данный момент). Nynorsk можно добавить как отдельный `language.yaml`.
+8. **Мультиязычный** — целевой язык задаётся `language: <code>` в `config.yaml` (встроены `nb`/`de`/`en`/`es`). Nynorsk можно добавить как отдельный `language.yaml` (`nn`).
 
 ---
 
@@ -361,10 +361,10 @@ CREATE TABLE anki_cache (
 
 | Симптом | Причина | Фикс |
 |---------|---------|------|
-| `ankicards push` → ConnectTimeout | Комп выключен / Anki не запущен / Tailscale не подключён | Включить комп, открыть Anki, проверить `curl http://100.84.155.42:8765` |
-| Cron `exit code 1` | LLM API недоступен / n8n не отвечает | Проверить `curl http://192.168.10.182:5678/healthz` |
-| `review` не работает в моём терминале | `questionary` требует TTY | Запустить `ankicards review` в интерактивном терминале пользователя |
-| Уведомление в Telegram не пришло | n8n workflow упал | Проверить executions: `curl http://192.168.10.182:5678/api/v1/executions?workflowId=8MhBd9pXSOLG5rVh` |
+| `ankiforgeai push` → ConnectTimeout | Комп выключен / Anki не запущен / Anki недоступен по сети (Tailscale и т.п.) | Включить комп, открыть Anki, проверить `curl <anki.url из config.yaml>` |
+| Cron `exit code 1` | LLM API недоступен / n8n не отвечает | Проверить `curl <n8n-host>:5678/healthz` |
+| `review` не работает в моём терминале | `questionary` требует TTY | Запустить `ankiforgeai review` в интерактивном терминале пользователя |
+| Уведомление в Telegram не пришло | n8n workflow упал | Проверить executions в интерфейсе n8n для нужного workflow |
 | `get_language('xx')` → FileNotFoundError | Нет `languages/xx/language.yaml` | Создать по образцу |
 | `load_prompt` не находит промпт в языке | Промпт не скопирован в `languages/{code}/prompts/` | `cp prompts/*.md languages/{code}/prompts/` |
 | Жирный текст не работает в Telegram | parse_mode: Markdown не совместим с некоторыми символами | Использовать HTML-теги или экранировать спецсимволы |
@@ -388,27 +388,27 @@ pytest tests/ -v
 # Проверить кодстайл
 ruff check src/ && mypy src/
 
-# Проверить, доступен ли Anki
-curl -m 5 http://100.84.155.42:8765 -d '{"action":"version","version":6}'
+# Проверить, доступен ли Anki (URL — из config.yaml → anki.url, по умолчанию локальный)
+curl -m 5 http://127.0.0.1:8765 -d '{"action":"version","version":6}'
 
 # Проверить конфиг языка
 python -c "from ankicards.config import get_language; l=get_language('nb'); print(l.name, l.code)"
 python -c "from ankicards.config import get_language; l=get_language('de'); print(l.forms['noun'])"
 
-# Проверить n8n webhook
-curl -X POST http://192.168.10.182:5678/webhook/ankicards-notify -H 'Content-Type: application/json' -d '{"text":"test"}'
+# Проверить n8n webhook (URL — из $N8N_WEBHOOK_URL, см. scripts/daily_topic.sh)
+curl -X POST http://localhost:5678/webhook/ankicards-notify -H 'Content-Type: application/json' -d '{"text":"test"}'
 ```
 
 ---
 
 ## 10. План на будущее
 
-- [ ] Добавить `language: nb` в `config.yaml` (сейчас — дефолт `get_language()`)
-- [ ] `ankicards config set language.de`
+- [x] Добавить `language: <code>` в `config.yaml`, прокинуть во все `get_language()` (было: всегда дефолт `nb`)
+- [x] Выбор языка интерактивно — `ankiforgeai setup` (вместо предполагавшегося `ankicards config set language.de`)
 - [ ] Поддержка `parse_mode: MarkdownV2` с экранированием спецсимволов
 - [ ] Nynorsk как отдельный `language.yaml` (`nn`)
-- [ ] CI/CD (GitHub Actions: ruff + mypy + pytest)
+- [x] CI/CD (GitHub Actions: ruff + mypy + pytest)
 - [ ] Публикация в PyPI
-- [ ] LICENSE (MIT)
-- [ ] CHANGELOG
+- [x] LICENSE (MIT)
+- [x] CHANGELOG
 - [ ] Конфигурируемый Note Type (сейчас жёстко `LanguageCard` с 12 полями)

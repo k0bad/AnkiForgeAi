@@ -142,8 +142,8 @@ async def _call_openai(prompt: str, cfg: Config) -> str:
         max_tokens=cfg.llm.max_tokens,
         temperature=cfg.llm.temperature,
         extra_headers={
-            "HTTP-Referer": "https://github.com/Kobets1/anki",
-            "X-Title": "AnkiCards",
+            "HTTP-Referer": "https://github.com/k0bad/AnkiForgeAi",
+            "X-Title": "AnkiForgeAI",
         },
     )
 

@@ -1,6 +1,6 @@
 # Расписание тем для ежедневной генерации слов в AnkiCards (cron).
 # Каждый день недели — своя тема. Ключ дня — английское название (monday..sunday).
-# topic передаётся в `ankicards ingest topic "<topic>"`.
+# topic передаётся в `ankiforgeai ingest topic "<topic>"`.
 # count / level — параметры генерации для этого дня (перекрывают defaults из config.yaml).
 
 schedule:
