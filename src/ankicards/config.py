@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 
 import yaml
@@ -191,7 +191,7 @@ def get_secrets() -> Secrets:
     return Secrets()
 
 
-@lru_cache(maxsize=None)
+@cache
 def get_language(target: str | None = None) -> LanguageConfig:
     """Загрузить языковой профиль из languages/{target}/language.yaml."""
     code = target or "nb"
