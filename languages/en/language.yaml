@@ -1,0 +1,50 @@
+code: en
+name: English
+article: false
+
+pos_labels:
+  noun: noun
+  verb: verb
+  adj: adjective
+  adv: adverb
+  pron: pronoun
+  prep: preposition
+  conj: conjunction
+  interj: interjection
+  num: numeral
+  phrase: phrase / expression
+  other: other
+
+forms:
+  noun:
+    - {key: singular, label: Singular}
+    - {key: plural, label: Plural}
+  verb:
+    - {key: base_form, label: Base form}
+    - {key: past_simple, label: Past simple}
+    - {key: past_participle, label: Past participle}
+    - {key: present_participle, label: Present participle (-ing)}
+    - {key: third_person, label: 3rd person singular}
+  adj:
+    - {key: positive, label: Positive}
+    - {key: comparative, label: Comparative}
+    - {key: superlative, label: Superlative}
+
+tts:
+  voice_female: en-US-JennyNeural
+  voice_male: en-US-GuyNeural
+  default_voice: female
+
+anki:
+  deck_name: English
+  note_type: LanguageCard
+
+back_labels:
+  translation: "Перевод"
+  part_of_speech: "Часть речи"
+  grammar: "Грамматика"
+  example: "Пример"
+  example_translation: "Перевод примера"
+  pronunciation: "Транскрипция"
+  level: "Уровень"
+  topic: "Тема"

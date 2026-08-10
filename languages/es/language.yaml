@@ -1,0 +1,59 @@
+code: es
+name: Spanish
+article: true
+
+pos_labels:
+  noun: sustantivo
+  verb: verbo
+  adj: adjetivo
+  adv: adverbio
+  pron: pronombre
+  prep: preposición
+  conj: conjunción
+  interj: interjección
+  num: numeral
+  phrase: frase / expresión
+  other: otro
+
+forms:
+  noun:
+    - {key: gender, label: Род}
+    - {key: singular, label: Единственное число}
+    - {key: plural, label: Множественное число}
+  verb:
+    - {key: infinitive, label: Infinitivo}
+    - {key: present_yo, label: Presente (yo)}
+    - {key: present_tu, label: Presente (tú)}
+    - {key: present_el, label: Presente (él/ella/usted)}
+    - {key: present_nosotros, label: Presente (nosotros)}
+    - {key: present_ellos, label: Presente (ellos/ustedes)}
+    - {key: preterite_yo, label: Pretérito (yo)}
+    - {key: preterite_el, label: Pretérito (él/ella)}
+    - {key: imperfect_yo, label: Imperfecto (yo)}
+    - {key: future_yo, label: Futuro (yo)}
+    - {key: participle, label: Participio}
+    - {key: gerund, label: Gerundio}
+  adj:
+    - {key: masculine_singular, label: Masculino singular}
+    - {key: feminine_singular, label: Femenino singular}
+    - {key: masculine_plural, label: Masculino plural}
+    - {key: feminine_plural, label: Femenino plural}
+
+tts:
+  voice_female: es-ES-ElviraNeural
+  voice_male: es-ES-AlvaroNeural
+  default_voice: female
+
+anki:
+  deck_name: Español
+  note_type: LanguageCard
+
+back_labels:
+  translation: "Перевод"
+  part_of_speech: "Часть речи"
+  grammar: "Грамматика"
+  example: "Пример"
+  example_translation: "Перевод примера"
+  pronunciation: "Транскрипция"
+  level: "Уровень"
+  topic: "Тема"
