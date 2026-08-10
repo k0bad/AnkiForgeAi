@@ -1,8 +1,8 @@
 """Download Unsplash images for all noun cards without images.
 
 Usage:
-    uv run python run_images.py               # process all nouns
-    uv run python run_images.py --limit 20     # process only 20 (test run)
+    uv run python scripts/run_images.py               # process all nouns
+    uv run python scripts/run_images.py --limit 20     # process only 20 (test run)
 """
 from __future__ import annotations
 

@@ -100,6 +100,10 @@ uv pip install -e ".[dev]"
 cp .env.example .env
 # edit .env — add your API keys
 
+# Interactive setup (recommended): pick language, LLM provider, Anki URL — writes config.yaml
+ankiforgeai setup
+# ...or skip the wizard and edit config.yaml by hand
+
 # Initialize
 python scripts/init_db.py
 
@@ -180,7 +184,7 @@ src/ankicards/
 
 languages/                 # Language profiles (YAML + prompts)
 prompts/                   # Default prompts
-scripts/                   # init_db, setup, daily_topic
+scripts/                   # init_db, setup_anki_notetype, daily_topic, run_images
 tests/
 data/                      # DB, logs (gitignored)
 media/                     # Audio, images (gitignored)
