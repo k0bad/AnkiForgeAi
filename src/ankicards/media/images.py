@@ -18,12 +18,14 @@ from pathlib import Path
 import httpx
 from PIL import Image
 
+from .._net import http_retry
 from ..config import Config, get_secrets
 from ..models import Card
 
 UNSPLASH_SEARCH_URL = "https://api.unsplash.com/search/photos"
 
 
+@http_retry
 async def search_images(query: str, cfg: Config, count: int = 5) -> list[dict]:
     """Поиск картинок. Возвращает список {url, thumb, author, ...}."""
     secrets = get_secrets()
@@ -55,6 +57,7 @@ async def search_images(query: str, cfg: Config, count: int = 5) -> list[dict]:
     ]
 
 
+@http_retry
 async def download_image(url: str, out_path: Path, cfg: Config) -> None:
     """Скачать и ресайзнуть."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
