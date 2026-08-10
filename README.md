@@ -1,35 +1,38 @@
-# AnkiCards
+# AnkiForgeAI
 
-Пайплайн словарных карточек для изучения языков с автоматической отправкой в Anki.
-**Поддерживает любой язык** через конфигурируемые YAML-профили (`languages/{code}/language.yaml`).
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
+[![CI](https://github.com/k0bad/AnkiForgeAi/actions/workflows/test.yml/badge.svg)](https://github.com/k0bad/AnkiForgeAi/actions)
 
-Встроенные языки: 🇳🇴 Norwegian Bokmål (`nb`), 🇩🇪 German (`de`).
+AI-powered vocabulary flashcard pipeline for any language with automatic delivery to Anki.
+**Language-agnostic** via configurable YAML profiles (`languages/{code}/language.yaml`).
 
-## Что делает
+Built-in languages: 🇳🇴 Norwegian Bokmål (`nb`), 🇩🇪 German (`de`).
 
-1. **Ingest** — собирает кандидатов в карточки одним из способов:
-   - парсинг URL (норвежская статья / урок)
-   - генерация по теме через Claude API («20 слов про еду, A2»)
-2. **Enrich** — добавляет грамматические формы, перевод, пример с переводом.
-3. **Dedupe** — проверяет дубликаты против уже существующих в Anki и в staging.
-4. **Media** — генерирует mp3 (edge-tts) и качает картинку (Unsplash).
-5. **Review** — интерактивный ревью спорных кандидатов в Claude Code chat или CLI.
-6. **Push** — отправляет одобренные карточки в Anki через AnkiConnect.
+## What it does
 
-## Архитектурные решения
+1. **Ingest** — generates word candidates:
+   - by topic via LLM ("20 food-related words, A2")
+   - from a URL (web page extraction + LLM parsing)
+2. **Enrich** — adds grammar forms, translation, example sentences.
+3. **Dedupe** — checks duplicates against existing Anki notes and staging DB.
+4. **Media** — generates mp3 audio (edge-tts) and downloads images (Unsplash).
+5. **Review** — interactive review of ambiguous candidates (CLI).
+6. **Push** — sends approved cards to Anki via AnkiConnect.
 
-| Решение | Почему |
-|---|---|
-| **AnkiConnect**, не CSV | Двусторонняя синхронизация, можно проверять дубликаты против реальной колоды Anki |
-| **SQLite** как staging + audit + кэш | Anki = источник истины, SQLite = быстрый локальный индекс и история операций |
-| **Расширенная схема `forms` как JSON** | Разные структуры для существительных/глаголов/прилагательных без раздувания таблицы |
-| **edge-tts** вместо gTTS | Нейросетевые голоса Microsoft, бесплатно, отличное качество для bokmål |
-| **Unsplash API** | Легально, бесплатно (50/час), реальные фото |
-| **Одна колода `Norsk` + иерархические теги** | Anki SRS работает лучше с interleaving; теги дают гибкую фильтрацию |
-| **Промпты в `prompts/*.md`** | Можно итерировать качество без правки кода |
-| **Только Claude API** для LLM | Локальный qwen2.5-coder слаб для норвежского; токены дёшевы |
+## Architecture
 
-## Статусы карточки
+| Decision | Why |
+|----------|-----|
+| **AnkiConnect**, not CSV | Two-way sync, dedupe against live Anki deck |
+| **SQLite** as staging + audit + cache | Anki = source of truth, SQLite = local index + history |
+| **`forms` as JSON** | Different schemas for nouns/verbs/adjectives per language |
+| **edge-tts** over gTTS | Microsoft neural voices, free, per-language quality |
+| **Unsplash API** | Legal, free (50 req/hour), real photos |
+| **Prompts in `prompts/*.md`** | Improve card quality without touching code |
+| **Any LLM provider** | OpenRouter or Anthropic Claude |
+
+## Card statuses
 
 ```
 pending → review → approved → pushed
@@ -37,147 +40,159 @@ pending → review → approved → pushed
            skipped / suspended
 ```
 
-- **pending** — только что создана, ещё не обогащена/не проверена
-- **review** — найдены потенциальные дубликаты, нужно решение
-- **approved** — готова к отправке в Anki
-- **pushed** — уже в Anki (`anki_note_id` заполнен)
-- **skipped** — отброшена (с указанием причины в audit_log)
-- **suspended** — отложена (например, ждёт картинку)
+- **pending** — just created, not yet enriched
+- **review** — potential duplicates found, needs decision
+- **approved** — ready for push to Anki
+- **pushed** — already in Anki (`anki_note_id` set)
+- **skipped** — discarded (reason in audit_log)
+- **suspended** — postponed
 
-## Поддерживаемые языки
+## Supported Languages
 
-Проект использует конфигурируемые YAML-профили в `languages/{code}/`. Поддерживаются:
+Language profiles live in `languages/{code}/`. Currently supported:
 
-| Язык | Код | Статус |
-|------|-----|--------|
-| 🇳🇴 Norwegian Bokmål | `nb` | ✅ Полный |
-| 🇩🇪 German | `de` | ✅ Проверен |
+| Language | Code | Status |
+|----------|------|--------|
+| 🇳🇴 Norwegian Bokmål | `nb` | ✅ Complete |
+| 🇩🇪 German | `de` | ✅ Verified |
 
-### Как добавить свой язык
+### Adding Your Language
 
-1. Создать `languages/{code}/language.yaml` по образцу ([nb](languages/nb/language.yaml) / [de](languages/de/language.yaml)):
+1. Create `languages/{code}/language.yaml` using [nb](languages/nb/language.yaml) or [de](languages/de/language.yaml) as template:
 ```yaml
 code: xx              # ISO 639-1
 name: Language Name
-article: true         # есть ли артикли у существительных
-pos_labels:           # POS → название на целевом языке
+article: true         # whether nouns have articles
+pos_labels:           # POS → target language name
   noun: ...
   verb: ...
-forms:                # схема грамматических полей для каждой POS
+forms:                # grammar field schema per POS
   noun:
-    - {key: gender, label: "Род"}
+    - {key: gender, label: "Gender"}
     - {key: ...}
-tts:                  # голоса edge-tts
+tts:                  # edge-tts voices
   voice_female: xx-XX-NameNeural
 anki:
   deck_name: MyDeck
-back_labels:          # переводы label'ов на язык пользователя
-  translation: "Перевод"
+back_labels:          # labels in your native language
+  translation: "Translation"
 ```
-2. Скопировать промпты: `cp prompts/*.md languages/{code}/prompts/`
-3. Адаптировать промпты под целевой язык (контекст, примеры)
-4. Поменять `language` в `config.yaml` (когда появится — пока через `get_language('xx'))
+2. Copy prompts: `cp prompts/*.md languages/{code}/prompts/`
+3. Adapt prompts for the target language
+4. **Minimal setup for a working language:** `language.yaml` + `topic_words.md`
 
-**Минимальный набор для рабочего языка:** `language.yaml` + промпт `topic_words.md`
+## Installation
 
-## Установка
-
-```powershell
-# 1. Python 3.11+
-# 2. Anki desktop + addon AnkiConnect (https://ankiweb.net/shared/info/2055492159)
-# 3. Зависимости (рекомендую uv: https://github.com/astral-sh/uv)
+```bash
+# Python 3.11+ required
+# Anki desktop + AnkiConnect addon (https://ankiweb.net/shared/info/2055492159)
 
 uv venv
-.venv\Scripts\activate
+source .venv/bin/activate     # Linux/macOS
+# .venv\Scripts\activate      # Windows
 uv pip install -e ".[dev]"
 
-# 4. Конфигурация
-copy .env.example .env
-# отредактировать .env — добавить ANTHROPIC_API_KEY и UNSPLASH_ACCESS_KEY
+# Configuration
+cp .env.example .env
+# edit .env — add your API keys
 
-# 5. Инициализация
+# Initialize
 python scripts/init_db.py
 
-# 6. (При запущенном Anki) создать Note Type
+# (With Anki running) Create Note Type
 python scripts/setup_anki_notetype.py
 ```
 
-## Использование
+## Usage
 
-```powershell
-# Сгенерировать 20 слов про еду уровня A2
-ankicards ingest topic "mat" --count 20 --level A2
+```bash
+# Generate 20 food-related words at A2 level
+ankiforgeai ingest topic "mat" --count 20 --level A2
 
-# Извлечь слова со страницы
-ankicards ingest url "https://www.nrk.no/norge/..."
+# Extract words from a web page
+ankiforgeai ingest url "https://example.com/lesson"
 
-# Пройти ревью спорных кандидатов
-ankicards review
+# Run interactive review
+ankiforgeai review
 
-# Отправить approved карточки в Anki
-ankicards push
+# Push approved cards to Anki
+ankiforgeai push
 
-# Обновить локальный кэш заметок из Anki (раз в день)
-ankicards sync
+# Sync Anki → local cache (daily)
+ankiforgeai sync
 
-# Статистика
-ankicards stats
+# View stats
+ankiforgeai stats
 ```
 
-## Workflow в Claude Code
+## Automated Daily Cycle
 
-В чате VS Code просто говори:
+```bash
+# Full autonomous cycle: generate → auto-accept → push → notify
+python scripts/daily_topic.py
 
-> «Сгенерируй 20 слов по теме клothing уровня A2»
+# Preview what today's topic would be
+python scripts/daily_topic.py --dry-run
 
-Claude сам вызовет нужные команды, покажет результат, спросит про дубликаты, отправит в Anki после твоего «ок».
+# Override topic and count
+python scripts/daily_topic.py --topic dyr --count 5 --no-push
+```
 
-## Структура проекта
+Set up as a cron job for hands-free daily vocabulary generation with Telegram delivery.
+
+## Project Structure
 
 ```
 src/ankicards/
-├── models.py              # Card, Forms, Decision (pydantic)
-├── config.py              # config.yaml + .env
+├── models.py              # Card, POS, Status, Decision (Pydantic)
+├── config.py              # config.yaml + language profiles
 ├── db.py                  # SQLite layer
 ├── cli.py                 # Typer CLI
-├── pipeline.py            # оркестратор стадий
-├── dedupe.py              # exact + fuzzy match
+├── pipeline.py            # Stage orchestration
+├── llm.py                 # LLM client (OpenRouter/Anthropic)
+├── dedupe.py              # Exact + fuzzy matching (rapidfuzz)
 ├── ingest/
 │   ├── url.py             # trafilatura + LLM
-│   └── topic.py           # Claude API
+│   └── topic.py           # Topic-based generation
 ├── enrich/
-│   ├── grammar.py         # формы по POS
-│   ├── translation.py
-│   └── examples.py
+│   ├── grammar.py         # Grammar forms per POS
+│   ├── translation.py     # Translations
+│   ├── examples.py        # Example sentences
+│   └── pronunciation.py   # Pronunciation hints
 ├── media/
-│   ├── tts.py             # edge-tts
-│   └── images.py          # Unsplash
+│   ├── tts.py             # edge-tts audio
+│   └── images.py          # Unsplash images
 ├── anki/
-│   ├── connect.py         # HTTP клиент
-│   ├── sync.py            # Anki → cache
-│   └── notetype.py        # Note Type definition
+│   ├── connect.py         # HTTP client for AnkiConnect
+│   ├── sync.py            # Anki → cache sync
+│   └── notetype.py        # Note type definition
 └── review/
-    └── interactive.py     # rich + questionary
+    └── interactive.py     # Rich + questionary UI
 
-prompts/                   # MD-промпты, перезагружаются на каждом вызове
-scripts/                   # init_db, setup_anki_notetype
+languages/                 # Language profiles (YAML + prompts)
+prompts/                   # Default prompts
+scripts/                   # init_db, setup, daily_topic
 tests/
-data/                      # ankicards.db, logs (в .gitignore)
-media/                     # audio, images (в .gitignore)
+data/                      # DB, logs (gitignored)
+media/                     # Audio, images (gitignored)
 ```
 
 ## Roadmap
 
-- [x] Скелет проекта
-- [ ] AnkiConnect клиент
-- [ ] Ingest по теме (Claude API)
-- [ ] Dedupe (rapidfuzz)
-- [ ] edge-tts
-- [ ] Note Type setup script
-- [ ] Push pipeline
-- [ ] Sync Anki → cache
-- [ ] Ingest URL (trafilatura)
-- [ ] Unsplash images
-- [ ] Тесты
-- [ ] Опционально: Telegram бот для мобильного ревью
-- [ ] Опционально: nynorsk поддержка
+- [x] Multi-language architecture
+- [x] Ingest by topic (LLM)
+- [x] Ingest from URL (trafilatura + LLM)
+- [x] Dedupe (rapidfuzz)
+- [x] Grammar enrichment
+- [x] edge-tts audio
+- [x] Unsplash images
+- [x] AnkiConnect push & sync
+- [x] Interactive review CLI
+- [x] Full auto cycle (cron + auto-accept + push + notify)
+- [ ] PyPI publication
+- [ ] Nynorsk support
+- [ ] Telegram bot for mobile review
+
+## For Developers
+
+See [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for the full architecture reference, and [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.

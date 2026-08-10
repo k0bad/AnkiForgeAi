@@ -1,7 +1,7 @@
 [project]
 name = "ankicards"
 version = "0.1.0"
-description = "Norwegian vocabulary pipeline: ingest → enrich → dedupe → media → Anki"
+description = "AnkiForgeAI — multilingual vocabulary pipeline with AI-powered flashcard generation for any language."
 requires-python = ">=3.11"
 
 dependencies = [
@@ -39,7 +39,7 @@ dev = [
 ]
 
 [project.scripts]
-ankicards = "ankicards.cli:app"
+ankiforgeai = "ankicards.cli:app"
 
 [build-system]
 requires = ["hatchling"]
