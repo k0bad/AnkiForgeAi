@@ -31,7 +31,7 @@ class PathsConfig(BaseModel):
 class AnkiConfig(BaseModel):
     url: str = "http://127.0.0.1:8765"
     deck_name: str = "Norsk"
-    note_type: str = "NorskCard"
+    note_type: str = "LanguageCard"
 
 
 class DedupeConfig(BaseModel):
@@ -77,6 +77,14 @@ class ReviewConfig(BaseModel):
     auto_accept_below_score: bool = True
 
 
+class EnrichConfig(BaseModel):
+    """Какие стадии обогащения запускать (настраивается в setup wizard)."""
+
+    grammar: bool = True
+    examples: bool = True
+    pronunciation: bool = True
+
+
 class LoggingConfig(BaseModel):
     level: str = "INFO"
     json_logs: bool = True
@@ -107,7 +115,24 @@ class LanguageConfig(BaseModel):
         return PROJECT_ROOT / "languages" / self.code / "prompts"
 
 
+# Английские подписи бэк-стороны карточки — альтернатива дефолтным русским
+# back_labels из languages/{code}/language.yaml (все языковые профили сейчас
+# зашивают русские подписи). Выбирается в setup wizard (config.ui_language).
+EN_BACK_LABELS: dict[str, str] = {
+    "translation": "Translation",
+    "part_of_speech": "Part of Speech",
+    "grammar": "Grammar",
+    "example": "Example",
+    "example_translation": "Example Translation",
+    "pronunciation": "Pronunciation",
+    "level": "Level",
+    "topic": "Topic",
+}
+
+
 class Config(BaseModel):
+    language: str = "nb"  # код целевого языка → languages/{code}/language.yaml
+    ui_language: str = "ru"  # язык подписей бэк-стороны карточки: "ru" | "en"
     paths: PathsConfig
     anki: AnkiConfig
     dedupe: DedupeConfig
@@ -116,6 +141,7 @@ class Config(BaseModel):
     tts: TTSConfig
     images: ImagesConfig
     review: ReviewConfig
+    enrich: EnrichConfig = Field(default_factory=EnrichConfig)
     logging: LoggingConfig
     tags: TagsConfig
 
@@ -165,7 +191,7 @@ def get_secrets() -> Secrets:
     return Secrets()
 
 
-@lru_cache(maxsize=1)
+@lru_cache(maxsize=None)
 def get_language(target: str | None = None) -> LanguageConfig:
     """Загрузить языковой профиль из languages/{target}/language.yaml."""
     code = target or "nb"

@@ -55,7 +55,7 @@ def load_prompt(name: str, **kwargs: Any) -> str:
 
     # Сначала пытаемся загрузить из языковой папки
     try:
-        lang = get_language()
+        lang = get_language(cfg.language)
         lang_path = lang.prompts_dir / f"{name}.md"
         if lang_path.exists():
             path = lang_path
