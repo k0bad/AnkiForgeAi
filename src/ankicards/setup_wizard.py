@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import cast
 
 import questionary
 import yaml
@@ -37,7 +38,7 @@ def _discover_languages() -> list[str]:
 def _load_language_meta(code: str) -> dict:
     """Load language.yaml metadata."""
     with (LANGUAGES_DIR / code / "language.yaml").open(encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        return cast(dict, yaml.safe_load(f))
 
 
 def run_setup() -> None:
