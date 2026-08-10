@@ -7,7 +7,7 @@
 AI-powered vocabulary flashcard pipeline for any language with automatic delivery to Anki.
 **Language-agnostic** via configurable YAML profiles (`languages/{code}/language.yaml`).
 
-Built-in languages: 🇳🇴 Norwegian Bokmål (`nb`), 🇩🇪 German (`de`).
+Built-in languages: 🇳🇴 Norwegian Bokmål (`nb`), 🇩🇪 German (`de`), 🇬🇧 English (`en`), 🇪🇸 Spanish (`es`).
 
 ## What it does
 
@@ -54,7 +54,11 @@ Language profiles live in `languages/{code}/`. Currently supported:
 | Language | Code | Status |
 |----------|------|--------|
 | 🇳🇴 Norwegian Bokmål | `nb` | ✅ Complete |
-| 🇩🇪 German | `de` | ✅ Verified |
+| 🇩🇪 German | `de` | ✅ Complete |
+| 🇬🇧 English | `en` | ✅ Complete |
+| 🇪🇸 Spanish | `es` | ✅ Complete |
+
+Select the active language with `language: <code>` in `config.yaml`, or pick it interactively via `ankiforgeai setup`.
 
 ### Adding Your Language
 
@@ -128,7 +132,7 @@ ankiforgeai stats
 ## Automated Daily Cycle
 
 ```bash
-# Full autonomous cycle: generate → auto-accept → push → notify
+# Generate → dedupe/enrich/media → auto-accept → push (no Telegram notification)
 python scripts/daily_topic.py
 
 # Preview what today's topic would be
@@ -136,9 +140,14 @@ python scripts/daily_topic.py --dry-run
 
 # Override topic and count
 python scripts/daily_topic.py --topic dyr --count 5 --no-push
+
+# Full cycle incl. Telegram notification via n8n webhook — use this for cron
+./scripts/daily_topic.sh
 ```
 
-Set up as a cron job for hands-free daily vocabulary generation with Telegram delivery.
+`daily_topic.py` alone does not send notifications — `daily_topic.sh` wraps it and
+forwards its output to an n8n webhook. Set up `daily_topic.sh` as a cron job for
+hands-free daily vocabulary generation with Telegram delivery.
 
 ## Project Structure
 
