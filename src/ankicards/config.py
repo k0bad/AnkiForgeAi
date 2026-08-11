@@ -13,8 +13,26 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_PACKAGE_DIR = Path(__file__).resolve().parent
+BUNDLED_LANGUAGES_DIR = _PACKAGE_DIR / "languages"
+BUNDLED_PROMPTS_DIR = _PACKAGE_DIR / "prompts"
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if not (PROJECT_ROOT / "languages").is_dir():
+    # Installed from PyPI (pip/uv tool install) — no sibling languages/ dir
+    # next to the package. config.yaml / data / media live in the directory
+    # the user runs `ankiforgeai` from instead. languages/ and prompts/
+    # fall back to the copies bundled inside the package (see pyproject.toml
+    # tool.hatch.build.targets.wheel.force-include and languages_dir() below).
+    PROJECT_ROOT = Path.cwd()
+
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.yaml"
+
+
+def languages_dir() -> Path:
+    """Root dir for language profiles: PROJECT_ROOT/languages, or bundled if absent."""
+    checkout_dir = PROJECT_ROOT / "languages"
+    return checkout_dir if checkout_dir.is_dir() else BUNDLED_LANGUAGES_DIR
 
 
 # ───────────── Pydantic-схемы для config.yaml ─────────────
@@ -124,7 +142,7 @@ class LanguageConfig(BaseModel):
 
     @property
     def prompts_dir(self) -> Path:
-        return PROJECT_ROOT / "languages" / self.code / "prompts"
+        return languages_dir() / self.code / "prompts"
 
 
 # Английские подписи бэк-стороны карточки — альтернатива дефолтным русским
@@ -211,7 +229,7 @@ def get_secrets() -> Secrets:
 def get_language(target: str | None = None) -> LanguageConfig:
     """Загрузить языковой профиль из languages/{target}/language.yaml."""
     code = target or "nb"
-    lang_path = PROJECT_ROOT / "languages" / code / "language.yaml"
+    lang_path = languages_dir() / code / "language.yaml"
     if not lang_path.exists():
         raise FileNotFoundError(f"Language file not found: {lang_path}")
     with lang_path.open(encoding="utf-8") as f:

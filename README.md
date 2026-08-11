@@ -88,10 +88,23 @@ back_labels:          # labels in your native language
 
 ## Installation
 
-```bash
-# Python 3.11+ required
-# Anki desktop + AnkiConnect addon (https://ankiweb.net/shared/info/2055492159)
+Requires Python 3.11+ and Anki desktop + the [AnkiConnect](https://ankiweb.net/shared/info/2055492159) addon.
 
+### As a tool (end users)
+
+```bash
+uv tool install ankiforgeai   # or: pipx install ankiforgeai / pip install ankiforgeai
+ankiforgeai setup             # writes config.yaml in the current directory
+ankiforgeai init              # creates the local DB and the Anki Note Type
+```
+
+`config.yaml`, `data/`, and `media/` are created in whatever directory you run `ankiforgeai` from — `cd` into a project folder first (e.g. `mkdir ~/ankiforgeai && cd ~/ankiforgeai`).
+
+### From source (contributors)
+
+```bash
+git clone https://github.com/k0bad/AnkiForgeAi.git
+cd AnkiForgeAi
 uv venv
 source .venv/bin/activate     # Linux/macOS
 # .venv\Scripts\activate      # Windows
@@ -101,11 +114,8 @@ uv pip install -e ".[dev]"
 cp .env.example .env
 # edit .env — add your API keys
 
-# Initialize
-python scripts/init_db.py
-
-# (With Anki running) Create Note Type
-python scripts/setup_anki_notetype.py
+# Initialize (DB + Anki Note Type)
+ankiforgeai init
 ```
 
 ## Usage
@@ -207,7 +217,7 @@ media/                     # Audio, images (gitignored)
 - [x] Interactive review CLI
 - [x] Full auto cycle (cron + auto-accept + push + notify)
 - [x] Pluggable notification channels (generic webhook: n8n / Zapier / Hermes / any)
-- [ ] PyPI publication
+- [ ] PyPI publication — package and release workflow are ready (see `DEVELOPER_GUIDE.md` §12), pending one-time trusted-publisher setup on pypi.org
 - [ ] Nynorsk support
 - [ ] Telegram bot for mobile review
 

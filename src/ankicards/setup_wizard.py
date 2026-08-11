@@ -11,7 +11,6 @@ Guides user through:
 from __future__ import annotations
 
 import shutil
-from pathlib import Path
 from typing import cast
 
 import questionary
@@ -19,9 +18,10 @@ import yaml
 from rich.console import Console
 from rich.panel import Panel
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-LANGUAGES_DIR = PROJECT_ROOT / "languages"
-CONFIG_PATH = PROJECT_ROOT / "config.yaml"
+from .config import DEFAULT_CONFIG_PATH, languages_dir
+
+LANGUAGES_DIR = languages_dir()
+CONFIG_PATH = DEFAULT_CONFIG_PATH
 
 console = Console()
 

@@ -20,6 +20,8 @@ from rich.console import Console
 from rich.table import Table
 
 from .anki.connect import AnkiConnect
+from .anki.notetype import CSS, FIELDS, FRONT_TEMPLATE, back_template
+from .anki.notetype import _get_note_type_name as get_note_type_name
 from .anki.sync import sync_anki_to_cache
 from .config import get_config
 from .db import Database
@@ -61,10 +63,36 @@ def init() -> None:
     cfg = get_config()
     Database(cfg.paths.db)
     console.print(f"[green]✓[/] БД создана: {cfg.paths.db}")
-    console.print(
-        "[yellow]![/] Для создания Note Type в Anki запусти:\n"
-        "    python scripts/setup_anki_notetype.py"
-    )
+
+    async def _run() -> None:
+        anki = AnkiConnect(cfg)
+        try:
+            await anki.ensure_deck()
+        except Exception as e:
+            console.print(
+                f"[yellow]![/] Anki недоступен, Note Type не создан: {e}\n"
+                "    Запусти `ankiforgeai init` ещё раз, когда Anki будет открыт "
+                "(с addon AnkiConnect)."
+            )
+            return
+        console.print(f"[green]✓[/] Deck готов: {cfg.anki.deck_name}")
+
+        note_type = get_note_type_name()
+        if note_type in await anki.model_names():
+            console.print(f"[green]✓[/] Note Type уже существует: {note_type}")
+            return
+
+        await anki.create_model(
+            model_name=note_type,
+            fields=FIELDS,
+            css=CSS,
+            card_templates=[
+                {"Name": "Recognition", "Front": FRONT_TEMPLATE, "Back": back_template()}
+            ],
+        )
+        console.print(f"[green]✓[/] Note Type создан: {note_type}")
+
+    asyncio.run(_run())
 
 
 @ingest_app.command("url")

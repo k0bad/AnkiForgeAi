@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**AnkiForgeAI** (package `ankicards`) — multilingual vocabulary pipeline: ingest words → enrich with grammar → generate media → push to Anki. Target language is configurable via `language:` in `config.yaml` and `languages/{code}/language.yaml` profiles (built-in: `nb` Norwegian Bokmål, `de` German, `en` English, `es` Spanish — see `languages/`).
+**AnkiForgeAI** — multilingual vocabulary pipeline: ingest words → enrich with grammar → generate media → push to Anki. Target language is configurable via `language:` in `config.yaml` and `languages/{code}/language.yaml` profiles (built-in: `nb` Norwegian Bokmål, `de` German, `en` English, `es` Spanish — see `languages/`). Three names, on purpose: PyPI/distribution name `ankiforgeai`, CLI command `ankiforgeai`, Python import package `ankicards` (kept for backwards compat, predates the rename).
 
 Primary workflow: user speaks Russian in VS Code chat, Claude invokes CLI commands and shows results. Example: «сгенерируй 20 слов по теме одежда A2» → `ankiforgeai ingest topic "одежда" --count 20 --level A2`.
 
@@ -24,10 +24,10 @@ ankiforgeai stats
 ankiforgeai setup           # interactive wizard: pick language, provider, Anki URL → writes config.yaml
 
 # One-time setup (run after install)
-python scripts/init_db.py           # create SQLite schema
-python scripts/setup_anki_notetype.py  # create the LanguageCard note type in Anki
-                                        # (name comes from languages/{language}/language.yaml anki.note_type,
-                                        #  must match anki.note_type in config.yaml)
+ankiforgeai init                    # creates the SQLite schema + the LanguageCard note type in Anki
+                                     # (name comes from languages/{language}/language.yaml anki.note_type,
+                                     #  must match anki.note_type in config.yaml; requires Anki running
+                                     #  with AnkiConnect for the note-type half)
 
 # Dev
 ruff check src/

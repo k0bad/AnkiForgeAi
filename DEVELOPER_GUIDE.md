@@ -72,8 +72,8 @@ src/ankicards/
 scripts/
 ├── daily_topic.py     # Ежедневный автоцикл: generate → auto-accept → push → notify
 ├── daily_topic.sh     # Тонкая обёртка для cron: python scripts/daily_topic.py --notify
-├── init_db.py         # Создать SQLite схему
-├── setup_anki_notetype.py # Создать NorskCard/LanguageCard Note Type в Anki
+├── init_db.py         # Создать SQLite схему (легаси — `ankiforgeai init` делает то же самое)
+├── setup_anki_notetype.py # Создать NorskCard/LanguageCard Note Type в Anki (легаси, см. выше)
 └── run_images.py      # Batch-скачивание картинок для всех существительных
 
 languages/{code}/
@@ -444,7 +444,7 @@ curl -X POST http://<n8n-host>:5678/webhook/ankicards-notify -H 'Content-Type: a
 - [ ] Поддержка `parse_mode: MarkdownV2` с экранированием спецсимволов (`notify/webhook.py` сейчас рендерит под legacy `parse_mode: Markdown`)
 - [ ] Nynorsk как отдельный `language.yaml` (`nn`)
 - [x] CI/CD (GitHub Actions: ruff + mypy + pytest)
-- [ ] Публикация в PyPI
+- [ ] Публикация в PyPI — пакет/workflow готовы (см. §12), не хватает только разовой ручной регистрации trusted publisher на pypi.org и первого `git push origin vX.Y.Z`
 - [x] LICENSE (MIT)
 - [x] CHANGELOG
 - [ ] Конфигурируемый Note Type — имя (`anki.note_type`) уже берётся из языкового профиля, но набор полей (`FIELDS` в `anki/notetype.py`, сейчас фиксированные 12) всё ещё захардкожен
@@ -475,3 +475,47 @@ git reset --hard origin/dev     # переключиться на перепис
 `.env` в `.gitignore`, `reset --hard` его не тронет. Если на машине есть локальные незакоммиченные
 изменения в отслеживаемых файлах — сначала `git stash -u` (или закоммитить их отдельно) перед
 `reset --hard`, иначе они потеряются.
+
+---
+
+## 12. Публикация в PyPI
+
+Пакет называется `ankiforgeai` на PyPI (import-имя внутри остаётся `ankicards` — историческое,
+менять не стали, чтобы не переписывать все импорты). `languages/` и `prompts/` вшиты в wheel
+(`tool.hatch.build.targets.wheel.force-include` в `pyproject.toml`); `config.py` определяет
+`PROJECT_ROOT`/`languages_dir()` с фоллбэком на данные, вшитые в пакет, если рядом с кодом нет
+папки `languages/` — то есть при обычном dev-чекауте ничего не меняется, а при `pip install`
+пакет сам находит свои языковые профили и промпты вместо репо-путей.
+
+Проверить локально перед релизом:
+
+```bash
+rm -rf dist/
+uv build
+uv tool run --from twine twine check dist/*
+```
+
+### Разовая настройка (сделать один раз, руками, на pypi.org)
+
+Публикация идёт через **PyPI Trusted Publishing (OIDC)** — GitHub Actions публикует пакет без
+хранения токена в репозитории. Перед первым релизом:
+
+1. Завести аккаунт на [pypi.org](https://pypi.org) (если его ещё нет).
+2. В настройках аккаунта → **Publishing** → **Add a new pending publisher**, указать:
+   - PyPI Project Name: `ankiforgeai`
+   - Owner: `k0bad`
+   - Repository name: `AnkiForgeAi`
+   - Workflow name: `publish.yml`
+   - Environment name: `pypi`
+3. Это резервирует имя `ankiforgeai` на PyPI и разрешает publish-джобе из
+   `.github/workflows/publish.yml` (env `pypi`, `id-token: write`) публиковать без API-ключа.
+
+### Релиз
+
+```bash
+git tag -a vX.Y.Z -m "vX.Y.Z"
+git push origin vX.Y.Z
+```
+
+Пуш тега `v*` триггерит `.github/workflows/publish.yml`: собирает sdist+wheel, гоняет
+`twine check`, публикует на PyPI. Прогресс — в GitHub Actions репозитория.

@@ -1,7 +1,37 @@
 [project]
-name = "ankicards"
-version = "0.1.0"
+name = "ankiforgeai"
+version = "0.2.0"
 description = "AnkiForgeAI — multilingual vocabulary pipeline with AI-powered flashcard generation for any language."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "vladk", email = "101739264+k0bad@users.noreply.github.com" },
+]
+keywords = [
+    "anki",
+    "anki-connect",
+    "flashcards",
+    "language-learning",
+    "vocabulary",
+    "spaced-repetition",
+    "llm",
+    "cli",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Education",
+    "Topic :: Utilities",
+    "Typing :: Typed",
+]
 requires-python = ">=3.11"
 
 dependencies = [
@@ -44,9 +74,25 @@ dev = [
 [project.scripts]
 ankiforgeai = "ankicards.cli:app"
 
+[project.urls]
+Homepage = "https://github.com/k0bad/AnkiForgeAi"
+Repository = "https://github.com/k0bad/AnkiForgeAi"
+Issues = "https://github.com/k0bad/AnkiForgeAi/issues"
+Changelog = "https://github.com/k0bad/AnkiForgeAi/blob/main/CHANGELOG.md"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ankicards"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"languages" = "ankicards/languages"
+"prompts" = "ankicards/prompts"
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "languages", "prompts", "README.md", "LICENSE", "CHANGELOG.md"]
 
 [tool.ruff]
 line-length = 100
