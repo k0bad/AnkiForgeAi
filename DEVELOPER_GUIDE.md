@@ -439,15 +439,15 @@ curl -X POST http://<n8n-host>:5678/webhook/ankicards-notify -H 'Content-Type: a
 
 ## 10. План на будущее
 
-- [ ] Добавить `language: nb` в `config.yaml` (сейчас — дефолт `get_language()`)
-- [ ] `ankicards config set language.de`
-- [ ] Поддержка `parse_mode: MarkdownV2` с экранированием спецсимволов
+- [x] Добавить `language: nb` в `config.yaml` (сейчас — дефолт `get_language()`)
+- [ ] `ankiforgeai config set language.de` (CLI-команда для смены языка без ручного редактирования `config.yaml`)
+- [ ] Поддержка `parse_mode: MarkdownV2` с экранированием спецсимволов (`notify/webhook.py` сейчас рендерит под legacy `parse_mode: Markdown`)
 - [ ] Nynorsk как отдельный `language.yaml` (`nn`)
-- [ ] CI/CD (GitHub Actions: ruff + mypy + pytest)
+- [x] CI/CD (GitHub Actions: ruff + mypy + pytest)
 - [ ] Публикация в PyPI
-- [ ] LICENSE (MIT)
-- [ ] CHANGELOG
-- [ ] Конфигурируемый Note Type (сейчас жёстко `LanguageCard` с 12 полями)
+- [x] LICENSE (MIT)
+- [x] CHANGELOG
+- [ ] Конфигурируемый Note Type — имя (`anki.note_type`) уже берётся из языкового профиля, но набор полей (`FIELDS` в `anki/notetype.py`, сейчас фиксированные 12) всё ещё захардкожен
 
 ---
 
