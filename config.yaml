@@ -21,7 +21,7 @@ paths:
 
 anki:
   # AnkiConnect должен быть запущен (Anki desktop + addon 2055492159)
-  url: http://127.0.0.1:8765   # заменить на IP твоего Anki (напр. http://100.84.155.42:8765 через Tailscale)
+  url: http://127.0.0.1:8765   # заменить на IP твоего Anki (напр. http://100.64.0.1:8765 через Tailscale)
   deck_name: Norsk
   note_type: LanguageCard       # универсальное имя, создаётся setup_anki_notetype.py
                                  # (должно совпадать с anki.note_type в languages/{language}/language.yaml)
