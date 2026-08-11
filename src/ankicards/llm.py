@@ -84,18 +84,21 @@ def load_prompt(name: str, **kwargs: Any) -> str:
     return template
 
 
-async def call_text(prompt: str, cfg: Config | None = None) -> str:
+async def call_text(prompt: str, cfg: Config | None = None, model: str | None = None) -> str:
     """Вызвать LLM и вернуть текстовый ответ.
 
-    Провайдер выбирается из cfg.llm.provider.
+    Провайдер выбирается из cfg.llm.provider. `model` переопределяет cfg.llm.model
+    только для этого вызова (например, дешёвая модель под простую бинарную задачу
+    типа dedupe.judge_review) — провайдер и его ключ остаются те же.
     """
     cfg = cfg or get_config()
     provider = cfg.llm.provider
+    model = model or cfg.llm.model
 
     if provider == "anthropic":
-        return await _call_anthropic(prompt, cfg)
+        return await _call_anthropic(prompt, cfg, model)
     elif provider == "openrouter":
-        return await _call_openai(prompt, cfg)
+        return await _call_openai(prompt, cfg, model)
     else:
         raise ValueError(
             f"Неизвестный LLM провайдер: {provider!r}. Ожидается: 'anthropic' или 'openrouter'"
@@ -115,12 +118,12 @@ async def call_json(prompt: str, cfg: Config | None = None) -> Any:
 
 
 @_llm_retry
-async def _call_anthropic(prompt: str, cfg: Config) -> str:
+async def _call_anthropic(prompt: str, cfg: Config, model: str) -> str:
     from anthropic.types import TextBlock
 
     client = _client_anthropic()
     message = await client.messages.create(
-        model=cfg.llm.model,
+        model=model,
         max_tokens=cfg.llm.max_tokens,
         temperature=cfg.llm.temperature,
         messages=[{"role": "user", "content": prompt}],
@@ -133,11 +136,11 @@ async def _call_anthropic(prompt: str, cfg: Config) -> str:
 
 
 @_llm_retry
-async def _call_openai(prompt: str, cfg: Config) -> str:
+async def _call_openai(prompt: str, cfg: Config, model: str) -> str:
     client = _client_openai(cfg)
 
     response = await client.chat.completions.create(
-        model=cfg.llm.model,
+        model=model,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=cfg.llm.max_tokens,
         temperature=cfg.llm.temperature,

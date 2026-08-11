@@ -8,6 +8,11 @@
    - score < fuzzy_threshold_auto          → decision=new
 3. Дополнительно для близких score: сравнить translation/example.
 
+check_card() — чистая строковая эвристика, синхронная, без сети.
+judge_review() — опциональный второй проход поверх decision="review": спрашивает
+LLM, дубликат ли это на самом деле, чтобы не откладывать на человека каждое
+похожее по буквам, но по смыслу разное слово (см. cfg.dedupe.ai_adjudication).
+
 Источник эталонных слов:
 - db.all_words()        — staging
 - db.all_anki_words()   — кэш Anki (обновляется командой `sync`)
@@ -19,6 +24,7 @@ from rapidfuzz import fuzz, process
 
 from .config import Config
 from .db import Database
+from .llm import call_text, load_prompt
 from .models import Card, Decision, DuplicateMatch
 
 
@@ -113,3 +119,43 @@ def _fuzzy_matches(
         )
         for _, score, cid in results
     ]
+
+
+async def judge_review(card: Card, decision: Decision, cfg: Config) -> Decision:
+    """Для decision="review" спросить LLM, дубликат ли это на самом деле.
+
+    rapidfuzz сравнивает буквы, а не смысл, поэтому "review" часто ловит просто
+    похожие по написанию, но разные слова. Здесь LLM смотрит на слово+перевод и
+    решает: SAME → merge (пропустить как дубликат), DIFFERENT → new (принять),
+    UNSURE или сбой вызова → decision не меняется, остаётся на человеке
+    (никогда не молчим до auto-accept при ошибке LLM).
+    """
+    if not cfg.dedupe.ai_adjudication or decision.decision != "review" or not decision.matches:
+        return decision
+
+    match = decision.matches[0]
+    try:
+        prompt = load_prompt(
+            "dedupe_judge",
+            new_word=card.word,
+            new_translation=card.translation,
+            new_pos=card.pos.value,
+            existing_word=match.existing_word,
+            score=match.score,
+        )
+        verdict = (await call_text(prompt, model=cfg.dedupe.judge_model or None)).strip().upper()
+    except Exception:
+        return decision
+
+    if verdict == "SAME":
+        return Decision(
+            decision="merge",
+            matches=decision.matches,
+            reason=f"AI: дубликат '{match.existing_word}' (fuzzy {match.score:.0f})",
+        )
+    if verdict == "DIFFERENT":
+        return Decision(
+            decision="new",
+            reason=f"AI: другое слово, не '{match.existing_word}' (fuzzy {match.score:.0f})",
+        )
+    return decision

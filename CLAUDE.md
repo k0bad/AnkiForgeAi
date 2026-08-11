@@ -69,7 +69,7 @@ Review can interrupt at any stage — user sees pending/review cards and accepts
 | `config.py` | Loads `config.yaml` + `.env`; all config objects are Pydantic, cached |
 | `db.py` | `Database` class — SQLite with `connect()` context manager |
 | `pipeline.py` | Orchestrator `run_ingest_pipeline()` and `push_approved()` |
-| `dedupe.py` | `check_card()` → fuzzy match via rapidfuzz; thresholds in `config.yaml` |
+| `dedupe.py` | `check_card()` → fuzzy match via rapidfuzz; `judge_review()` → LLM adjudicates ambiguous matches; thresholds in `config.yaml` |
 | `anki/connect.py` | Async HTTP client for AnkiConnect API (port 8765) |
 | `anki/notetype.py` | NorskCard note type definition: 12 fields, HTML/CSS templates |
 | `ingest/topic.py` | Calls Claude with `prompts/topic_words.md` → `list[Card]` |
@@ -98,6 +98,7 @@ Key settings to know:
 - `transcription: practical | ipa` — pronunciation hint style: `practical` (Cyrillic respelling, default) or `ipa` (International Phonetic Alphabet); picks between `languages/{code}/prompts/russian_pronunciation.md` and `ipa_pronunciation.md`
 - `llm.provider` / `llm.model`: default is `openrouter` / `deepseek/deepseek-v4-flash`; set `provider: anthropic` + a `claude-*` model to use Claude instead
 - `dedupe.fuzzy_threshold_review: 85` — score ≥ 85 → mandatory review; 70–84 → semiauto
+- `dedupe.ai_adjudication: true` — for fuzzy matches, ask the LLM whether it's a real duplicate before falling back to human review (`dedupe.judge_review`, `prompts/dedupe_judge.md`); `dedupe.judge_model` optionally pins a cheaper/faster model for just that call (empty = `llm.model`, same provider)
 - `tts.voice_female` / `tts.voice_male` — come from the active language profile by default (`languages/{code}/language.yaml` → `tts:`); override in `config.yaml` to pin a different voice
 - `images.provider: unsplash | pexels | pixabay | openverse` — search backend for `media/images.py`; matching API key goes in `.env` (`UNSPLASH_ACCESS_KEY` / `PEXELS_API_KEY` / `PIXABAY_API_KEY`), `openverse` needs none
 - `images.only_for_pos: [noun]` — images generated only for nouns

@@ -13,7 +13,7 @@ from .anki.connect import AnkiConnect, AnkiConnectError
 from .anki.notetype import card_to_anki_fields
 from .config import Config
 from .db import Database
-from .dedupe import check_card
+from .dedupe import check_card, judge_review
 from .enrich.examples import enrich_example_batch
 from .enrich.grammar import enrich_grammar_batch
 from .enrich.pronunciation import enrich_pronunciation_batch
@@ -39,6 +39,7 @@ async def run_ingest_pipeline(
     accepted: list[Card] = []
     for card in cards:
         decision = check_card(card, db, cfg)
+        decision = await judge_review(card, decision, cfg)
         if decision.decision == "merge":
             db.log_action(
                 "skip_duplicate",

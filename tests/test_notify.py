@@ -39,7 +39,7 @@ def _report(**overrides: Any) -> dict[str, Any]:
         "count": 1,
         "new_words": [{"word": "brød", "translation": "хлеб", "pos": "noun"}],
         "stats": {"new": 1, "review": 0, "merged": 0, "enriched": 1, "audio": 1, "errors": 0},
-        "auto_accepted": 0,
+        "needs_review": 0,
         "pushed": 1,
         "push_error": None,
     }

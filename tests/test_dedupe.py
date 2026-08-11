@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from ankicards import dedupe as dedupe_module
 from ankicards.config import (
     AnkiConfig,
     Config,
@@ -27,8 +28,8 @@ from ankicards.config import (
     TTSConfig,
 )
 from ankicards.db import Database
-from ankicards.dedupe import _exact_match, _fuzzy_matches, check_card
-from ankicards.models import POS, Card
+from ankicards.dedupe import _exact_match, _fuzzy_matches, check_card, judge_review
+from ankicards.models import POS, Card, Decision, DuplicateMatch
 
 
 def _make_config(tmp_path: Path) -> Config:
@@ -137,3 +138,116 @@ def test_ignores_self_id(db: Database, cfg: Config) -> None:
     decision = check_card(card, db, cfg)
 
     assert decision.decision == "new"
+
+
+def _review_decision() -> Decision:
+    return Decision(
+        decision="review",
+        matches=[
+            DuplicateMatch(
+                existing_card_id="id1", existing_word="kjøkken", score=90.0, matched_field="word"
+            )
+        ],
+        reason="fuzzy score 90.0 >= 85",
+    )
+
+
+async def test_judge_review_passes_configured_judge_model(
+    cfg: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_call_text(prompt: str, **kw: object) -> object:
+        seen.update(kw)
+        return _async("same")
+
+    monkeypatch.setattr(dedupe_module, "load_prompt", lambda name, **kw: "prompt")
+    monkeypatch.setattr(dedupe_module, "call_text", _fake_call_text)
+    cfg.dedupe.judge_model = "deepseek/deepseek-v4-flash"
+
+    await judge_review(_card("kjokken"), _review_decision(), cfg)
+
+    assert seen["model"] == "deepseek/deepseek-v4-flash"
+
+
+async def test_judge_review_same_verdict_returns_merge(
+    cfg: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(dedupe_module, "load_prompt", lambda name, **kw: "prompt")
+    monkeypatch.setattr(dedupe_module, "call_text", lambda prompt, **kw: _async("same"))
+
+    result = await judge_review(_card("kjokken"), _review_decision(), cfg)
+
+    assert result.decision == "merge"
+    assert result.matches[0].existing_word == "kjøkken"
+
+
+async def test_judge_review_different_verdict_returns_new(
+    cfg: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(dedupe_module, "load_prompt", lambda name, **kw: "prompt")
+    monkeypatch.setattr(dedupe_module, "call_text", lambda prompt, **kw: _async("different"))
+
+    result = await judge_review(_card("kjokken"), _review_decision(), cfg)
+
+    assert result.decision == "new"
+
+
+async def test_judge_review_unsure_verdict_keeps_review(
+    cfg: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(dedupe_module, "load_prompt", lambda name, **kw: "prompt")
+    monkeypatch.setattr(dedupe_module, "call_text", lambda prompt, **kw: _async("unsure"))
+
+    decision = _review_decision()
+    result = await judge_review(_card("kjokken"), decision, cfg)
+
+    assert result is decision
+
+
+async def test_judge_review_llm_error_keeps_review(
+    cfg: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _boom(prompt: str, **kw: str) -> str:
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr(dedupe_module, "load_prompt", lambda name, **kw: "prompt")
+    monkeypatch.setattr(dedupe_module, "call_text", _boom)
+
+    decision = _review_decision()
+    result = await judge_review(_card("kjokken"), decision, cfg)
+
+    assert result is decision
+
+
+async def test_judge_review_disabled_skips_llm(
+    cfg: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _boom(name: str, **kw: str) -> str:
+        raise AssertionError("load_prompt should not be called when ai_adjudication is off")
+
+    monkeypatch.setattr(dedupe_module, "load_prompt", _boom)
+    cfg.dedupe.ai_adjudication = False
+
+    decision = _review_decision()
+    result = await judge_review(_card("kjokken"), decision, cfg)
+
+    assert result is decision
+
+
+async def test_judge_review_noop_for_non_review_decision(
+    cfg: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _boom(name: str, **kw: str) -> str:
+        raise AssertionError("load_prompt should not be called for a non-review decision")
+
+    monkeypatch.setattr(dedupe_module, "load_prompt", _boom)
+
+    decision = Decision(decision="new")
+    result = await judge_review(_card("kjokken"), decision, cfg)
+
+    assert result is decision
+
+
+async def _async(value: str) -> str:
+    return value

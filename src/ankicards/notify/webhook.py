@@ -70,8 +70,10 @@ def format_report(report: dict[str, Any]) -> str:
         f"audio={stats.get('audio', 0)}, errors={stats.get('errors', 0)}"
     )
 
-    if report.get("auto_accepted"):
-        lines.append(f"🔄 Авто-принято: {report['auto_accepted']} карточек → approved")
+    if report.get("needs_review"):
+        lines.append(
+            f"⏳ Ждут ручного ревью: {report['needs_review']} карточек (`ankiforgeai review`)"
+        )
 
     if report.get("pushed"):
         lines.append(f"📤 Отправлено в Anki: {report['pushed']} карточек")

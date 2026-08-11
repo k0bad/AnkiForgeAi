@@ -143,7 +143,7 @@ ankiforgeai stats
 ## Automated Daily Cycle
 
 ```bash
-# Generate → dedupe/enrich/media → auto-accept → push (no Telegram notification)
+# Generate → dedupe (AI-adjudicated)/enrich/media → push (no Telegram notification)
 python scripts/daily_topic.py
 
 # Preview what today's topic would be
@@ -215,11 +215,12 @@ media/                     # Audio, images (gitignored)
 - [x] Selectable pronunciation transcription (practical Cyrillic / IPA)
 - [x] AnkiConnect push & sync
 - [x] Interactive review CLI
-- [x] Full auto cycle (cron + auto-accept + push + notify)
+- [x] Full auto cycle (cron + dedupe + push + notify)
 - [x] Pluggable notification channels (generic webhook: n8n / Zapier / Hermes / any)
+- [x] AI-adjudicated dedupe — ambiguous fuzzy matches are judged by the LLM (same word vs. coincidentally similar), not blindly auto-accepted or left for a human by default
 - [ ] PyPI publication — package and release workflow are ready (see `DEVELOPER_GUIDE.md` §12), pending one-time trusted-publisher setup on pypi.org
 - [ ] Nynorsk support
-- [ ] Telegram bot for mobile review
+- [ ] Telegram bot for mobile review — lower priority now that AI dedupe adjudication keeps the manual-review queue small; still useful for the rare leftover cards
 
 ## For Developers
 

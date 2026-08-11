@@ -57,6 +57,13 @@ class DedupeConfig(BaseModel):
     fuzzy_threshold_review: float = 85
     fuzzy_threshold_auto: float = 70
     compare_fields: list[str] = Field(default_factory=lambda: ["Word", "Translation"])
+    # Для нечётких совпадений спрашивать LLM "это дубликат или просто похожие слова",
+    # вместо того чтобы всегда откладывать решение на человека (см. dedupe.judge_review).
+    ai_adjudication: bool = True
+    # Модель именно для judge_review (пусто = взять llm.model). Задача бинарная
+    # (SAME/DIFFERENT/UNSURE), топовая/дорогая модель тут не нужна — можно
+    # указать дешёвую/быструю, провайдер (llm.provider) при этом не меняется.
+    judge_model: str = ""
 
 
 class IngestConfig(BaseModel):

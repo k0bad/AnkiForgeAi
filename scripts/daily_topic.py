@@ -3,7 +3,7 @@
 Читает data/topic_schedule.yaml, выбирает тему для сегодняшнего дня
 и запускает полный пайплайн ingest (LLM → enrich → dedupe → save).
 
-Уведомления (шаг 5) отправляются через src/ankicards/notify/ — каналы
+Уведомления (шаг 4) отправляются через src/ankicards/notify/ — каналы
 берутся из config.yaml -> notifications: [...]. По умолчанию отчёт
 только печатается в stdout; передай --notify, чтобы разослать его по
 включённым каналам (так делает scripts/daily_topic.sh для cron — ручные
@@ -11,10 +11,13 @@
 
 ПОЛНЫЙ АВТОМАТИЧЕСКИЙ ЦИКЛ (daily_topic.sh):
 1. Генерация слов по теме
-2. Dedupe + enrich + media
-3. Авто-принятие всех review-карточек → approved
-4. Авто-push в Anki (если AnkiConnect доступен)
-5. Уведомление по каналам из config.yaml -> notifications
+2. Dedupe (rapidfuzz + AI-адъюдикация нечётких совпадений, см. dedupe.judge_review) + enrich + media
+3. Авто-push approved-карточек в Anki (если AnkiConnect доступен)
+4. Уведомление по каналам из config.yaml -> notifications
+
+Карточки, которые dedupe не смог разрешить автоматически (LLM не уверен,
+cfg.dedupe.ai_adjudication выключен, или сбой вызова), остаются в статусе
+review и НЕ пушатся — их число попадает в отчёт, разобрать вручную: `ankiforgeai review`.
 
 Использование:
     uv run python scripts/daily_topic.py             # тема по дню недели, без уведомлений
@@ -94,13 +97,15 @@ def main() -> None:
     db = Database(cfg.paths.db)
 
     async def _run() -> None:
-        auto_accepted = 0
         pushed = 0
         push_error = ""
 
         # ─── 1. Генерация ───
         exclude = [w for _, w in db.all_words()]
         cards = await ingest_by_topic(topic=topic, count=count, level=level, exclude_words=exclude)
+        # dedupe внутри пайплайна уже пытается разрешить нечёткие совпадения через
+        # dedupe.judge_review (LLM) — сюда доходят только те, что AI не смог
+        # уверенно классифицировать; они остаются status=review, не approved.
         stats = await run_ingest_pipeline(cards, db=db, cfg=cfg)
 
         # Собираем новые слова для отчёта
@@ -110,12 +115,8 @@ def main() -> None:
                 continue
             new_words.append((c.word, c.translation, c.pos.value))
 
-        # ─── 2. Авто-принятие review-карточек → approved ───
-        review_cards = db.get_by_status(Status.REVIEW)
-        for card in review_cards:
-            db.update_status(card.id, Status.APPROVED)
-            db.log_action("auto_accept", card_id=card.id, details={})
-            auto_accepted += 1
+        # ─── 2. Размер очереди на ручное ревью (не трогаем, только считаем) ───
+        needs_review = len(db.get_by_status(Status.REVIEW))
 
         # ─── 3. Авто-push в Anki (если не --no-push) ───
         if not args.no_push:
@@ -143,7 +144,7 @@ def main() -> None:
                 for word, trans, pos in new_words
             ],
             "stats": stats,
-            "auto_accepted": auto_accepted,
+            "needs_review": needs_review,
             "pushed": pushed,
             "push_error": push_error or None,
         }

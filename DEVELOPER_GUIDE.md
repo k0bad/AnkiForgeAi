@@ -28,7 +28,7 @@ mypy src/
 
 # Ежедневный cron (полный автоцикл)
 python scripts/daily_topic.py --dry-run                 # что бы сгенерировало
-python scripts/daily_topic.py                           # генерация + авто-принятие + push (без уведомления)
+python scripts/daily_topic.py                           # генерация + AI-дедуп + push (без уведомления)
 python scripts/daily_topic.py --notify                  # то же + уведомление по каналам из config.yaml
 python scripts/daily_topic.py --topic dyr --count 5     # другая тема вручную
 ```
@@ -70,7 +70,7 @@ src/ankicards/
     └── interactive.py # rich + questionary UI (только TTY)
 
 scripts/
-├── daily_topic.py     # Ежедневный автоцикл: generate → auto-accept → push → notify
+├── daily_topic.py     # Ежедневный автоцикл: generate → dedupe (AI-адъюдикация) → push → notify
 ├── daily_topic.sh     # Тонкая обёртка для cron: python scripts/daily_topic.py --notify
 ├── init_db.py         # Создать SQLite схему (легаси — `ankiforgeai init` делает то же самое)
 ├── setup_anki_notetype.py # Создать NorskCard/LanguageCard Note Type в Anki (легаси, см. выше)
@@ -95,12 +95,16 @@ languages/{code}/
 │     ├─ LLM (OpenRouter/Anthropic) → list[Card]                  │
 │     └─ Card(status=pending, word, pos, translation)             │
 │                                                                 │
-│  2. DEDUPE (check_card)                                         │
+│  2. DEDUPE (check_card + judge_review)                          │
 │     ├─ _exact_match → merge (score=100)                         │
 │     ├─ _fuzzy_matches(threshold=cfg.dedupe.fuzzy_threshold_auto)│
 │     │   ├─ score >= fuzzy_threshold_review → review             │
 │     │   ├─ score in [auto, review)        → review (semiauto)   │
 │     │   └─ no match → new (авто-добавление)                     │
+│     ├─ judge_review(): для decision=review LLM решает,          │
+│     │   правда ли это дубликат (prompts/dedupe_judge.md)        │
+│     │   SAME → merge · DIFFERENT → new · UNSURE/ошибка → review │
+│     │   (если cfg.dedupe.ai_adjudication выключен — пропускается)│
 │     └─ Decision(new | review | merge | skip)                    │
 │                                                                 │
 │  3. ENRICH (для accepted карточек)                              │
@@ -115,8 +119,10 @@ languages/{code}/
 │                                                                 │
 │  5. DB SAVE → status=approved                                   │
 │                                                                 │
-│  6. AUTO-ACCEPT (daily_topic.py)                                │
-│     └─ Все review-карточки → status=approved                    │
+│  6. REVIEW QUEUE (daily_topic.py)                               │
+│     └─ Что осталось в status=review (шаг 2 не смог разрешить) — │
+│        НЕ трогается, только считается → report["needs_review"]  │
+│        разобрать вручную: ankiforgeai review                    │
 │                                                                 │
 │  7. AUTO-PUSH (daily_topic.py)                                  │
 │     ├─ AnkiConnect.ensure_deck() → createDeck                   │
@@ -136,8 +142,8 @@ languages/{code}/
 ### Статусы карточки
 
 ```
-pending → approved (авто-принято) → pushed (в Anki)
-        → review   (нужен человек) → approved → pushed
+pending → approved (dedupe уверен / AI решил DIFFERENT) → pushed (в Anki)
+        → review   (AI не уверен или выключен) → approved (вручную, ankiforgeai review) → pushed
         → skipped  (отброшена)
         → merged   (дубликат — не добавляется)
 ```
@@ -148,8 +154,12 @@ pending → approved (авто-принято) → pushed (в Anki)
 transcription: practical       # practical (кириллица) | ipa (Международный фонетический алфавит)
 
 dedupe:
-  fuzzy_threshold_review: 85   # ≥ 85 → обязательный ревью
+  fuzzy_threshold_review: 85   # ≥ 85 → обязательный ревью (если AI тоже не разрешит)
   fuzzy_threshold_auto: 82     # < 82 → авто-добавление; 82-84 → semiauto ревью
+  ai_adjudication: true        # LLM решает SAME/DIFFERENT для review-кандидатов
+                                # (см. dedupe.judge_review); false = как раньше, всегда на человека
+  judge_model: ""              # своя (дешёвая/быстрая) модель для judge_review;
+                                # пусто = llm.model. Провайдер (llm.provider) общий.
 
 llm:
   provider: openrouter          # openrouter | anthropic
@@ -186,7 +196,8 @@ cards (id, word, pronunciation, translation, example, example_translation,
        status, date_added, anki_note_id)
 
 audit_log (id, timestamp, action, card_id, details JSON)
-  └─ create / merge / skip / push / review_needed / auto_accept / ...
+  └─ create / skip_duplicate / review_needed / review_accept / review_edit /
+     review_skip / review_suspend / push / push_failed / enrich_failed / ...
 
 anki_cache (note_id, word, fields JSON, tags JSON, synced_at)
   └─ снимок заметок из Anki для быстрой дедупликации
@@ -316,7 +327,7 @@ pytest tests/test_language.py -v
 
 ```
 Cron (Hermes) → daily_topic.sh
-  ├─ 1. python daily_topic.py --notify → генерация + авто-принятие + push
+  ├─ 1. python daily_topic.py --notify → генерация + AI-дедуп + push
   ├─ 2. ankicards.notify.dispatch(report, cfg) → для каждого enabled-канала:
   │      webhook.WebhookNotifier.send() → POST payload на cfg.notifications[i].url
   │      payload = {"text": format_report(report)} если format=text (n8n)
@@ -364,7 +375,7 @@ CREATE TABLE cards (
 CREATE TABLE audit_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp   TEXT NOT NULL,               -- UTC ISO
-    action      TEXT NOT NULL,               -- create/merge/skip/push/review_needed/auto_accept/...
+    action      TEXT NOT NULL,               -- create/skip_duplicate/push/review_needed/review_accept/...
     card_id     TEXT,                        -- FK → cards.id (может быть NULL)
     details     TEXT                         -- JSON с деталями операции
 );
