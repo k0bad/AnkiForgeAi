@@ -90,3 +90,21 @@ tags:
   level_prefix: "level"          # → level::a2
   pos_prefix: "pos"              # → pos::noun
   source_prefix: "source"        # → source::nrk
+
+notifications:
+  # Каналы доставки отчёта scripts/daily_topic.py (--notify).
+  # type: webhook — POST JSON на любой URL-посредник (n8n, Hermes, Zapier, свой шлюз-бот).
+  # format: text (default) — готовое Telegram-flavored сообщение {"text": "..."}, под
+  #                           текущий n8n workflow (parse_mode: Markdown).
+  #         json            — сырой report целиком, без форматирования под конкретный
+  #                           мессенджер — для посредника со своей маршрутизацией
+  #                           (например Hermes: сам решает, в Telegram это, в другую
+  #                           соцсеть или в AI-агента).
+  - type: webhook
+    enabled: true
+    format: text
+    url: "http://localhost:5678/webhook/ankicards-notify"
+  # - type: webhook
+  #   enabled: false
+  #   format: json
+  #   url: "http://localhost:PORT/hermes-endpoint"

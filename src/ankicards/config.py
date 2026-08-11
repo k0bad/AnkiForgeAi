@@ -91,6 +91,17 @@ class LoggingConfig(BaseModel):
     human_logs: bool = True
 
 
+class NotificationConfig(BaseModel):
+    """Один канал доставки уведомлений (см. notify/)."""
+
+    type: str = "webhook"  # пока единственный бэкенд: POST JSON на произвольный URL
+    enabled: bool = True
+    url: str = ""
+    # "text" — готовое Telegram-flavored сообщение (для n8n и т.п.);
+    # "json" — сырой report целиком, для посредника со своей маршрутизацией (Hermes и т.п.)
+    format: str = "text"
+
+
 class TagsConfig(BaseModel):
     topic_prefix: str = "topic"
     level_prefix: str = "level"
@@ -144,6 +155,7 @@ class Config(BaseModel):
     enrich: EnrichConfig = Field(default_factory=EnrichConfig)
     logging: LoggingConfig
     tags: TagsConfig
+    notifications: list[NotificationConfig] = Field(default_factory=list)
 
     def resolve_paths(self) -> None:
         """Сделать относительные пути абсолютными от корня проекта."""
