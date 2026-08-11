@@ -86,6 +86,18 @@ def run_setup() -> None:
 
     console.print(f"[green]✓[/] Card labels: {'English' if ui_lang == 'en' else 'Russian'}")
 
+    transcription = questionary.select(
+        "How should pronunciation be shown?",
+        choices=[
+            questionary.Choice(
+                "Practical transcription (Cyrillic, for Russian speakers)", value="practical"
+            ),
+            questionary.Choice(
+                "IPA (International Phonetic Alphabet, universal)", value="ipa"
+            ),
+        ],
+    ).ask()
+
     # ─── 3. Card content preferences ───
     console.print()
     console.print("[cyan]What to show on flashcards?[/]")
@@ -144,6 +156,7 @@ def run_setup() -> None:
     config = {
         "language": target,
         "ui_language": ui_lang,
+        "transcription": transcription,
         "paths": {
             "db": "data/ankicards.db",
             "logs_dir": "data/logs",
@@ -230,6 +243,7 @@ def run_setup() -> None:
         f"Words/day:    {words_per_day}\n"
         f"LLM:          {model}\n"
         f"Images:       {image_provider if show_image else 'no'}\n"
+        f"Pronunciation:{transcription if show_pronunciation else 'no'}\n"
         f"Auto-accept:  {'yes' if auto_accept else 'no'}\n\n"
         "Next steps:\n"
         "  cp .env.example .env    — add your API keys\n"

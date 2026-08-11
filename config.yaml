@@ -5,6 +5,12 @@
 language: nb
 # Язык подписей на бэк-стороне карточки: "ru" | "en"
 ui_language: ru
+# Тип транскрипции произношения:
+#   practical — упрощённая запись кириллицей, ориентирована на русскоговорящих
+#               без лингвистической подготовки (languages/{code}/prompts/russian_pronunciation.md)
+#   ipa       — Международный фонетический алфавит, универсальный, но требует знания IPA
+#               (languages/{code}/prompts/ipa_pronunciation.md)
+transcription: practical
 
 paths:
   db: data/ankicards.db

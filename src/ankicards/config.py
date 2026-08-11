@@ -145,6 +145,7 @@ EN_BACK_LABELS: dict[str, str] = {
 class Config(BaseModel):
     language: str = "nb"  # код целевого языка → languages/{code}/language.yaml
     ui_language: str = "ru"  # язык подписей бэк-стороны карточки: "ru" | "en"
+    transcription: str = "practical"  # тип транскрипции произношения: "practical" | "ipa"
     paths: PathsConfig
     anki: AnkiConfig
     dedupe: DedupeConfig

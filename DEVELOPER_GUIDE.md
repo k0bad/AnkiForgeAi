@@ -145,6 +145,8 @@ pending → approved (авто-принято) → pushed (в Anki)
 ### Конфиг (config.yaml) — ключевые параметры
 
 ```yaml
+transcription: practical       # practical (кириллица) | ipa (Международный фонетический алфавит)
+
 dedupe:
   fuzzy_threshold_review: 85   # ≥ 85 → обязательный ревью
   fuzzy_threshold_auto: 82     # < 82 → авто-добавление; 82-84 → semiauto ревью
@@ -268,7 +270,8 @@ cp prompts/*.md languages/{code}/prompts/
 | `grammar_forms.md` | Заполнение грамматических форм | Формат вывода (под схему из language.yaml.forms) |
 | `example_sentence.md` | Генерация примера | Естественный контекст для языка |
 | `url_extract.md` | Извлечение слов из URL | Язык страниц |
-| `russian_pronunciation.md` | Транскрипция | Особенности произношения языка |
+| `russian_pronunciation.md` | Транскрипция (practical, кириллица) | Особенности произношения языка |
+| `ipa_pronunciation.md` | Транскрипция (IPA) | Правила IPA-транскрипции для языка (см. `config.transcription`) |
 
 ### Шаг 3: Проверить
 

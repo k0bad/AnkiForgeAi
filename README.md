@@ -29,6 +29,7 @@ Built-in languages: 🇳🇴 Norwegian Bokmål (`nb`), 🇩🇪 German (`de`), �
 | **`forms` as JSON** | Different schemas for nouns/verbs/adjectives per language |
 | **edge-tts** over gTTS | Microsoft neural voices, free, per-language quality |
 | **Pluggable image provider** | `images.provider`: Unsplash, Pexels, Pixabay, or key-free Openverse — legal, free tiers |
+| **Selectable transcription** | `transcription`: `practical` (Cyrillic respelling) or `ipa` — pronunciation hints aren't hardcoded to Russian speakers |
 | **Prompts in `prompts/*.md`** | Improve card quality without touching code |
 | **Any LLM provider** | OpenRouter or Anthropic Claude |
 

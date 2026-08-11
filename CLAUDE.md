@@ -95,6 +95,7 @@ Review can interrupt at any stage — user sees pending/review cards and accepts
 Key settings to know:
 - `language: nb` — active language profile, must match a `languages/{code}/` directory
 - `ui_language: ru` — back-of-card label language (`ru` or `en`; see `config.EN_BACK_LABELS`)
+- `transcription: practical | ipa` — pronunciation hint style: `practical` (Cyrillic respelling, default) or `ipa` (International Phonetic Alphabet); picks between `languages/{code}/prompts/russian_pronunciation.md` and `ipa_pronunciation.md`
 - `llm.provider` / `llm.model`: default is `openrouter` / `deepseek/deepseek-v4-flash`; set `provider: anthropic` + a `claude-*` model to use Claude instead
 - `dedupe.fuzzy_threshold_review: 85` — score ≥ 85 → mandatory review; 70–84 → semiauto
 - `tts.voice_female` / `tts.voice_male` — come from the active language profile by default (`languages/{code}/language.yaml` → `tts:`); override in `config.yaml` to pin a different voice
