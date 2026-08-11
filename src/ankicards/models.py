@@ -77,7 +77,7 @@ class Card(BaseModel):
 
     id: str = Field(default_factory=lambda: str(uuid4()))
     word: str  # основная форма (lemma)
-    pronunciation: str | None = None  # IPA, опционально
+    pronunciation: str | None = None  # практическая транскрипция или IPA — см. config.transcription
     translation: str  # 1-2 варианта
     example: str | None = None  # пример на норвежском
     example_translation: str | None = None  # перевод примера

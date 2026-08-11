@@ -1,25 +1,38 @@
-"""Генерация русской транскрипции для норвежских слов.
+"""Генерация транскрипции произношения для слов.
 
-Промпт: prompts/russian_pronunciation.md
+Тип транскрипции берётся из config.transcription:
+    practical → prompts/russian_pronunciation.md (кириллица, по умолчанию)
+    ipa       → prompts/ipa_pronunciation.md (Международный фонетический алфавит)
 """
 
 from __future__ import annotations
 
 import json
 
+from ..config import get_config
 from ..llm import call_json, load_prompt
 from ..models import Card
 
+_PROMPTS: dict[str, str] = {
+    "practical": "russian_pronunciation",
+    "ipa": "ipa_pronunciation",
+}
+
 
 async def enrich_pronunciation_batch(cards: list[Card]) -> list[Card]:
-    """Сгенерировать русскую транскрипцию для пачки карточек."""
+    """Сгенерировать транскрипцию произношения для пачки карточек."""
     targets = [c for c in cards if not c.pronunciation]
     if not targets:
         return cards
 
+    cfg = get_config()
+    prompt_name = _PROMPTS.get(cfg.transcription)
+    if prompt_name is None:
+        raise ValueError(f"Неизвестный тип транскрипции: {cfg.transcription!r}")
+
     payload = [{"id": c.id, "word": c.word, "pos": c.pos.value} for c in targets]
     prompt = load_prompt(
-        "russian_pronunciation",
+        prompt_name,
         words_json=json.dumps(payload, ensure_ascii=False),
     )
     raw = await call_json(prompt)

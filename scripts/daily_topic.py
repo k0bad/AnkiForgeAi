@@ -3,24 +3,24 @@
 Читает data/topic_schedule.yaml, выбирает тему для сегодняшнего дня
 и запускает полный пайплайн ingest (LLM → enrich → dedupe → save).
 
-Этот скрипт сам по себе выполняет шаги 1-4 и печатает отчёт в stdout.
-Шаг 5 (уведомление в Telegram) он НЕ отправляет — это делает обёртка
-scripts/daily_topic.sh, которая перехватывает stdout этого скрипта и
-шлёт его в n8n webhook. Если запускать daily_topic.py напрямую (не
-через .sh), уведомление в Telegram отправлено не будет.
+Уведомления (шаг 5) отправляются через src/ankicards/notify/ — каналы
+берутся из config.yaml -> notifications: [...]. По умолчанию отчёт
+только печатается в stdout; передай --notify, чтобы разослать его по
+включённым каналам (так делает scripts/daily_topic.sh для cron — ручные
+тестовые прогоны по умолчанию никого не уведомляют).
 
 ПОЛНЫЙ АВТОМАТИЧЕСКИЙ ЦИКЛ (daily_topic.sh):
 1. Генерация слов по теме
 2. Dedupe + enrich + media
 3. Авто-принятие всех review-карточек → approved
 4. Авто-push в Anki (если AnkiConnect доступен)
-5. Уведомление в Telegram (через n8n webhook) — только из .sh-обёртки
+5. Уведомление по каналам из config.yaml -> notifications
 
 Использование:
-    uv run python scripts/daily_topic.py             # тема по дню недели, без Telegram
+    uv run python scripts/daily_topic.py             # тема по дню недели, без уведомлений
     uv run python scripts/daily_topic.py --dry-run   # показать, что бы сгенерировало
     uv run python scripts/daily_topic.py --topic dyr --count 5   # переопределить
-    ./scripts/daily_topic.sh                          # полный цикл + Telegram (для cron)
+    ./scripts/daily_topic.sh                          # полный цикл + уведомления (для cron)
 """
 from __future__ import annotations
 
@@ -64,6 +64,9 @@ def main() -> None:
     parser.add_argument("--count", type=int, default=None, help="Сколько слов")
     parser.add_argument("--level", type=str, default=None, help="CEFR уровень")
     parser.add_argument("--no-push", action="store_true", help="Не пушить в Anki (только генерация)")
+    parser.add_argument(
+        "--notify", action="store_true", help="Разослать отчёт по каналам из config.yaml"
+    )
     args = parser.parse_args()
 
     schedule = load_schedule()
@@ -126,43 +129,33 @@ def main() -> None:
             except Exception as e:
                 push_error = f"Ошибка push: {e}"
 
-        # ─── 4. Формирование уведомления ───
-        lines = [
-            "📚 AnkiCards · ежедневная генерация",
-            "",
-            f"🗓️ {header}",
-            f"🕐 {_utc_now()}",
-            "",
-        ]
+        # ─── 4. Структурированный отчёт ───
+        report = {
+            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "generated_at": _utc_now(),
+            "day": day_key,
+            "topic": topic,
+            "label": label,
+            "level": level,
+            "count": count,
+            "new_words": [
+                {"word": word, "translation": trans, "pos": pos}
+                for word, trans, pos in new_words
+            ],
+            "stats": stats,
+            "auto_accepted": auto_accepted,
+            "pushed": pushed,
+            "push_error": push_error or None,
+        }
 
-        if not new_words:
-            lines.append("❌ Не удалось сгенерировать слова (пустой ответ LLM).")
-        else:
-            lines.append(f"✅ Новых слов: {len(new_words)}")
-            for word, trans, pos in new_words:
-                lines.append(f"  • **{word}** ({pos}) — {trans}")
+        from ankicards.notify.webhook import format_report
 
-        lines.append("")
-        lines.append(
-            f"📊 Статусы: new={stats.get('new',0)}, review={stats.get('review',0)}, "
-            f"merged={stats.get('merged',0)}, enriched={stats.get('enriched',0)}, "
-            f"audio={stats.get('audio',0)}, errors={stats.get('errors',0)}"
-        )
+        print(format_report(report))
 
-        if auto_accepted > 0:
-            lines.append(f"🔄 Авто-принято: {auto_accepted} карточек → approved")
+        if args.notify:
+            from ankicards.notify import dispatch
 
-        if pushed > 0:
-            lines.append(f"📤 Отправлено в Anki: {pushed} карточек")
-        elif push_error:
-            lines.append(f"⚠️ Push: {push_error}")
-        else:
-            lines.append("📤 Push: нет новых карточек для отправки")
-
-        lines.append("")
-        lines.append("✅ Полный цикл завершён автоматически")
-
-        print("\n".join(lines))
+            await dispatch(report, cfg)
 
     asyncio.run(_run())
 

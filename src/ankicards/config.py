@@ -66,6 +66,7 @@ class TTSConfig(BaseModel):
 
 class ImagesConfig(BaseModel):
     enabled: bool = True
+    provider: str = "unsplash"  # "unsplash" | "pexels" | "pixabay" | "openverse"
     per_page: int = 5
     only_for_pos: list[str] = Field(default_factory=lambda: ["noun"])
     max_size_kb: int = 500
@@ -89,6 +90,17 @@ class LoggingConfig(BaseModel):
     level: str = "INFO"
     json_logs: bool = True
     human_logs: bool = True
+
+
+class NotificationConfig(BaseModel):
+    """Один канал доставки уведомлений (см. notify/)."""
+
+    type: str = "webhook"  # пока единственный бэкенд: POST JSON на произвольный URL
+    enabled: bool = True
+    url: str = ""
+    # "text" — готовое Telegram-flavored сообщение (для n8n и т.п.);
+    # "json" — сырой report целиком, для посредника со своей маршрутизацией (Hermes и т.п.)
+    format: str = "text"
 
 
 class TagsConfig(BaseModel):
@@ -133,6 +145,7 @@ EN_BACK_LABELS: dict[str, str] = {
 class Config(BaseModel):
     language: str = "nb"  # код целевого языка → languages/{code}/language.yaml
     ui_language: str = "ru"  # язык подписей бэк-стороны карточки: "ru" | "en"
+    transcription: str = "practical"  # тип транскрипции произношения: "practical" | "ipa"
     paths: PathsConfig
     anki: AnkiConfig
     dedupe: DedupeConfig
@@ -144,6 +157,7 @@ class Config(BaseModel):
     enrich: EnrichConfig = Field(default_factory=EnrichConfig)
     logging: LoggingConfig
     tags: TagsConfig
+    notifications: list[NotificationConfig] = Field(default_factory=list)
 
     def resolve_paths(self) -> None:
         """Сделать относительные пути абсолютными от корня проекта."""
@@ -168,6 +182,8 @@ class Secrets(BaseSettings):
     anthropic_api_key: str = ""
     openrouter_api_key: str = ""
     unsplash_access_key: str = ""
+    pexels_api_key: str = ""
+    pixabay_api_key: str = ""
 
 
 # ───────────── API ─────────────

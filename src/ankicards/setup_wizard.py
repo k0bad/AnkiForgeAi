@@ -86,10 +86,33 @@ def run_setup() -> None:
 
     console.print(f"[green]✓[/] Card labels: {'English' if ui_lang == 'en' else 'Russian'}")
 
+    transcription = questionary.select(
+        "How should pronunciation be shown?",
+        choices=[
+            questionary.Choice(
+                "Practical transcription (Cyrillic, for Russian speakers)", value="practical"
+            ),
+            questionary.Choice(
+                "IPA (International Phonetic Alphabet, universal)", value="ipa"
+            ),
+        ],
+    ).ask()
+
     # ─── 3. Card content preferences ───
     console.print()
     console.print("[cyan]What to show on flashcards?[/]")
-    show_image = questionary.confirm("Show images (Unsplash) for nouns?", default=True).ask()
+    show_image = questionary.confirm("Show images for nouns?", default=True).ask()
+    image_provider = "unsplash"
+    if show_image:
+        image_provider = questionary.select(
+            "Which image provider?",
+            choices=[
+                questionary.Choice("Unsplash (recommended, real photos)", value="unsplash"),
+                questionary.Choice("Pexels", value="pexels"),
+                questionary.Choice("Pixabay", value="pixabay"),
+                questionary.Choice("Openverse (no API key needed)", value="openverse"),
+            ],
+        ).ask()
     show_grammar = questionary.confirm("Show grammar table on back?", default=True).ask()
     show_examples = questionary.confirm("Show example sentences?", default=True).ask()
     show_pronunciation = questionary.confirm(
@@ -133,6 +156,7 @@ def run_setup() -> None:
     config = {
         "language": target,
         "ui_language": ui_lang,
+        "transcription": transcription,
         "paths": {
             "db": "data/ankicards.db",
             "logs_dir": "data/logs",
@@ -173,6 +197,7 @@ def run_setup() -> None:
         },
         "images": {
             "enabled": show_image,
+            "provider": image_provider,
             "per_page": 5,
             "only_for_pos": ["noun"],
             "max_size_kb": 500,
@@ -217,7 +242,8 @@ def run_setup() -> None:
         f"Deck:         {meta['anki']['deck_name']}\n"
         f"Words/day:    {words_per_day}\n"
         f"LLM:          {model}\n"
-        f"Images:       {'yes' if show_image else 'no'}\n"
+        f"Images:       {image_provider if show_image else 'no'}\n"
+        f"Pronunciation:{transcription if show_pronunciation else 'no'}\n"
         f"Auto-accept:  {'yes' if auto_accept else 'no'}\n\n"
         "Next steps:\n"
         "  cp .env.example .env    — add your API keys\n"

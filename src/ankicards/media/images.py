@@ -1,18 +1,19 @@
-"""Поиск и скачивание картинок через Unsplash API.
+"""Поиск и скачивание картинок — провайдер выбирается cfg.images.provider.
 
-Бесплатный тариф: 50 запросов/час.
-https://unsplash.com/documentation
+Провайдеры (все бесплатные/freemium):
+- unsplash  (default) — https://unsplash.com/documentation, 50 запросов/час, нужен ключ
+- pexels    — https://www.pexels.com/api/documentation/, 200 запросов/час, нужен ключ
+- pixabay   — https://pixabay.com/api/docs/, 100 запросов/60с, нужен ключ
+- openverse — https://api.openverse.org/v1/#tag/images, ключ не нужен (CC-агрегатор)
 
 Скачивает только для существительных (cfg.images.only_for_pos).
 Имя файла: {card.id}.jpg, ресайзит до cfg.images.resize_to.
-
-В режиме review показывает N вариантов, пользователь выбирает.
-В auto-режиме берёт первый результат.
 """
 
 from __future__ import annotations
 
 import io
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import httpx
@@ -23,23 +24,23 @@ from ..config import Config, get_secrets
 from ..models import Card
 
 UNSPLASH_SEARCH_URL = "https://api.unsplash.com/search/photos"
+PEXELS_SEARCH_URL = "https://api.pexels.com/v1/search"
+PIXABAY_SEARCH_URL = "https://pixabay.com/api/"
+OPENVERSE_SEARCH_URL = "https://api.openverse.org/v1/images/"
 
 
 @http_retry
-async def search_images(query: str, cfg: Config, count: int = 5) -> list[dict]:
-    """Поиск картинок. Возвращает список {url, thumb, author, ...}."""
+async def _search_unsplash(query: str, cfg: Config, count: int) -> list[dict[str, str]]:
     secrets = get_secrets()
     if not secrets.unsplash_access_key:
         raise RuntimeError("UNSPLASH_ACCESS_KEY не задан в .env")
 
-    per_page = min(max(count, 1), cfg.images.per_page)
     headers = {"Authorization": f"Client-ID {secrets.unsplash_access_key}"}
     params: dict[str, str | int] = {
         "query": query,
-        "per_page": per_page,
+        "per_page": count,
         "orientation": "squarish",
     }
-
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(UNSPLASH_SEARCH_URL, params=params, headers=headers)
         response.raise_for_status()
@@ -55,6 +56,100 @@ async def search_images(query: str, cfg: Config, count: int = 5) -> list[dict]:
         }
         for item in payload.get("results", [])
     ]
+
+
+@http_retry
+async def _search_pexels(query: str, cfg: Config, count: int) -> list[dict[str, str]]:
+    secrets = get_secrets()
+    if not secrets.pexels_api_key:
+        raise RuntimeError("PEXELS_API_KEY не задан в .env")
+
+    headers = {"Authorization": secrets.pexels_api_key}
+    params: dict[str, str | int] = {"query": query, "per_page": count}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(PEXELS_SEARCH_URL, params=params, headers=headers)
+        response.raise_for_status()
+        payload = response.json()
+
+    return [
+        {
+            "url": item["src"]["large"],
+            "thumb": item["src"]["tiny"],
+            "author": item["photographer"],
+            "author_url": item["photographer_url"],
+            "html": item["url"],
+        }
+        for item in payload.get("photos", [])
+    ]
+
+
+@http_retry
+async def _search_pixabay(query: str, cfg: Config, count: int) -> list[dict[str, str]]:
+    secrets = get_secrets()
+    if not secrets.pixabay_api_key:
+        raise RuntimeError("PIXABAY_API_KEY не задан в .env")
+
+    params: dict[str, str | int] = {
+        "key": secrets.pixabay_api_key,
+        "q": query,
+        "per_page": max(count, 3),  # Pixabay требует per_page >= 3
+        "image_type": "photo",
+    }
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(PIXABAY_SEARCH_URL, params=params)
+        response.raise_for_status()
+        payload = response.json()
+
+    return [
+        {
+            "url": item["largeImageURL"],
+            "thumb": item["previewURL"],
+            "author": item["user"],
+            "author_url": f"https://pixabay.com/users/{item['user']}-{item['user_id']}/",
+            "html": item["pageURL"],
+        }
+        for item in payload.get("hits", [])[:count]
+    ]
+
+
+@http_retry
+async def _search_openverse(query: str, cfg: Config, count: int) -> list[dict[str, str]]:
+    params: dict[str, str | int] = {"q": query, "page_size": count, "license_type": "commercial"}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(OPENVERSE_SEARCH_URL, params=params)
+        response.raise_for_status()
+        payload = response.json()
+
+    return [
+        {
+            "url": item["url"],
+            "thumb": item.get("thumbnail") or item["url"],
+            "author": item.get("creator") or "unknown",
+            "author_url": item.get("creator_url") or item.get("foreign_landing_url", ""),
+            "html": item.get("foreign_landing_url", item["url"]),
+        }
+        for item in payload.get("results", [])
+    ]
+
+
+_PROVIDERS: dict[str, Callable[[str, Config, int], Awaitable[list[dict[str, str]]]]] = {
+    "unsplash": _search_unsplash,
+    "pexels": _search_pexels,
+    "pixabay": _search_pixabay,
+    "openverse": _search_openverse,
+}
+
+
+async def search_images(query: str, cfg: Config, count: int = 5) -> list[dict[str, str]]:
+    """Поиск картинок через cfg.images.provider. Возвращает [{url, thumb, author, ...}]."""
+    search = _PROVIDERS.get(cfg.images.provider)
+    if search is None:
+        raise ValueError(
+            f"Неизвестный провайдер картинок: {cfg.images.provider!r}. "
+            f"Ожидается один из: {', '.join(_PROVIDERS)}"
+        )
+    per_page = min(max(count, 1), cfg.images.per_page)
+    return await search(query, cfg, per_page)
 
 
 @http_retry
