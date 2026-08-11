@@ -202,9 +202,11 @@ media/                     # Audio, images (gitignored)
 - [x] Grammar enrichment
 - [x] edge-tts audio
 - [x] Pluggable image providers (Unsplash / Pexels / Pixabay / Openverse)
+- [x] Selectable pronunciation transcription (practical Cyrillic / IPA)
 - [x] AnkiConnect push & sync
 - [x] Interactive review CLI
 - [x] Full auto cycle (cron + auto-accept + push + notify)
+- [x] Pluggable notification channels (generic webhook: n8n / Zapier / Hermes / any)
 - [ ] PyPI publication
 - [ ] Nynorsk support
 - [ ] Telegram bot for mobile review
