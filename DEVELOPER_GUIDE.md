@@ -9,7 +9,7 @@
 
 ```bash
 # Установка
-cd /opt/data/projects/Anki
+cd path/to/AnkiForgeAI
 uv pip install -e ".[dev]"
 
 # CLI
@@ -28,7 +28,8 @@ mypy src/
 
 # Ежедневный cron (полный автоцикл)
 python scripts/daily_topic.py --dry-run                 # что бы сгенерировало
-python scripts/daily_topic.py                           # генерация + авто-принятие + push + уведомление
+python scripts/daily_topic.py                           # генерация + авто-принятие + push (без уведомления)
+python scripts/daily_topic.py --notify                  # то же + уведомление по каналам из config.yaml
 python scripts/daily_topic.py --topic dyr --count 5     # другая тема вручную
 ```
 
@@ -56,17 +57,21 @@ src/ankicards/
 │   └── pronunciation.py # Транскрипция
 ├── media/
 │   ├── tts.py         # edge-tts → mp3
-│   └── images.py      # Unsplash → jpg (только для существительных)
+│   └── images.py      # Поиск картинок (unsplash/pexels/pixabay/openverse) → jpg (nouns only)
 ├── anki/
 │   ├── connect.py     # HTTP-клиент к AnkiConnect API
 │   ├── sync.py        # Синхронизация Anki → локальный кэш
 │   └── notetype.py    # Note Type, шаблоны, рендеринг — МУЛЬТИЯЗЫЧНЫЙ
+├── notify/
+│   ├── base.py         # Notifier protocol
+│   ├── webhook.py       # generic POST JSON бэкенд (n8n/Hermes/Zapier/…), format: text|json
+│   └── __init__.py      # dispatch() — фан-аут по cfg.notifications, канал за каналом
 └── review/
     └── interactive.py # rich + questionary UI (только TTY)
 
 scripts/
 ├── daily_topic.py     # Ежедневный автоцикл: generate → auto-accept → push → notify
-├── daily_topic.sh     # Обёртка для cron: python + n8n webhook → Telegram
+├── daily_topic.sh     # Тонкая обёртка для cron: python scripts/daily_topic.py --notify
 ├── init_db.py         # Создать SQLite схему
 ├── setup_anki_notetype.py # Создать NorskCard/LanguageCard Note Type в Anki
 └── run_images.py      # Batch-скачивание картинок для всех существительных
@@ -106,7 +111,7 @@ languages/{code}/
 │                                                                 │
 │  4. MEDIA (для accepted карточек, если auto_media=True)          │
 │     ├─ edge-tts → {card.id}_nb.mp3 в media/audio/               │
-│     └─ Unsplash → {card.id}.jpg в media/images/ (только nouns)  │
+│     └─ images.provider → {card.id}.jpg в media/images/ (nouns)  │
 │                                                                 │
 │  5. DB SAVE → status=approved                                   │
 │                                                                 │
@@ -119,9 +124,11 @@ languages/{code}/
 │     ├─ AnkiConnect.add_note() → card_to_anki_fields()           │
 │     └─ status=pushed, anki_note_id заполнен                     │
 │                                                                 │
-│  8. NOTIFY (daily_topic.sh → n8n webhook → Telegram)            │
-│     └─ POST http://192.168.10.182:5678/webhook/ankicards-notify │
-│         → отформатированное сообщение → OS-бот (topic 115802)   │
+│  8. NOTIFY (daily_topic.py --notify → ankicards.notify.dispatch)│
+│     └─ по каждому включённому cfg.notifications:                │
+│         webhook → POST {"text": ...} на настроенный URL         │
+│         (сейчас: n8n → Telegram, http://.../webhook/…-notify)   │
+│         ошибка одного канала не блокирует остальные             │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -150,6 +157,7 @@ llm:
 
 images:
   enabled: true
+  provider: unsplash             # unsplash | pexels | pixabay | openverse
   only_for_pos: [noun]          # картинки только для существительных
 
 review:
@@ -161,7 +169,11 @@ review:
 ```
 OPENROUTER_API_KEY=your-openrouter-key
 ANTHROPIC_API_KEY=your-anthropic-key   # опционально
-UNSPLASH_ACCESS_KEY=...        # для картинок
+# Картинки — нужен только ключ провайдера, выбранного в images.provider:
+UNSPLASH_ACCESS_KEY=...        # provider: unsplash (default)
+PEXELS_API_KEY=...             # provider: pexels
+PIXABAY_API_KEY=...            # provider: pixabay
+# provider: openverse — ключ не нужен
 ```
 
 ### База данных (SQLite — `data/ankicards.db`)
@@ -287,15 +299,36 @@ pytest tests/test_language.py -v
 
 ## 5. Как работает доставка в Telegram
 
+Уведомления — pluggable слой `src/ankicards/notify/` (см. также `notify/webhook.py`):
+каналы описаны в `config.yaml -> notifications:`, каждый — `{type, enabled, url, format}`.
+Единственный бэкенд пока — `webhook` (generic POST JSON, покрывает n8n/Hermes/Zapier/
+любой свой шлюз-посредник). `format` управляет тем, что летит в теле запроса:
+- `text` (default) — готовое Telegram-flavored сообщение `{"text": "..."}`, под текущий
+  n8n workflow (parse_mode: Markdown).
+- `json` — сырой structured `report` целиком, без форматирования под конкретный
+  мессенджер — для посредника со своей маршрутизацией по каналам (Hermes и т.п.:
+  сам решает, Telegram это, другая соцсеть или AI-агент).
+
+Ошибка одного канала логируется и не мешает остальным (`dispatch()` в `notify/__init__.py`).
+
 ```
 Cron (Hermes) → daily_topic.sh
-  ├─ 1. python daily_topic.py → генерация + авто-принятие + push
-  ├─ 2. curl POST → n8n webhook (`$N8N_WEBHOOK_URL` или `http://<n8n-host>:5678/webhook/ankicards-notify`)
-  └─ 3. n8n workflow "AnkiCards Send Notification"
-       ├─ Webhook → Code: Prepare Message → HTTP Request (Telegram Bot API)
-       ├─ chat_id + message_thread_id (настроить в n8n workflow)
-       └─ parse_mode: Markdown (поддерживает **bold**, `code`)
+  ├─ 1. python daily_topic.py --notify → генерация + авто-принятие + push
+  ├─ 2. ankicards.notify.dispatch(report, cfg) → для каждого enabled-канала:
+  │      webhook.WebhookNotifier.send() → POST payload на cfg.notifications[i].url
+  │      payload = {"text": format_report(report)} если format=text (n8n)
+  │      payload = report                          если format=json (Hermes и т.п.)
+  └─ 3a. n8n workflow "AnkiCards Send Notification" (format=text канал)
+        ├─ Webhook → Code: Prepare Message → HTTP Request (Telegram Bot API)
+        ├─ chat_id + message_thread_id (настроить в n8n workflow)
+        └─ parse_mode: Markdown (поддерживает **bold**, `code`)
+     3b. Hermes/другой шлюз (format=json канал, если настроен) — сам решает
+        маршрутизацию по структурированным полям report
 ```
+
+Добавить канал (Slack/Discord/…) — новый файл `notify/<name>.py` с классом,
+у которого есть `async def send(self, report: dict) -> None`, плюс запись в
+`_BACKENDS` в `notify/__init__.py`. Правка `daily_topic.py`/`.sh` не нужна.
 
 **Почему n8n, а не Hermes gateway:** gateway сейчас нестабилен (конфликт двух профилей).  
 n8n шлёт напрямую через Telegram Bot API — надёжнее, как weather-workflow.
@@ -361,10 +394,10 @@ CREATE TABLE anki_cache (
 
 | Симптом | Причина | Фикс |
 |---------|---------|------|
-| `ankicards push` → ConnectTimeout | Комп выключен / Anki не запущен / Tailscale не подключён | Включить комп, открыть Anki, проверить `curl http://100.84.155.42:8765` |
-| Cron `exit code 1` | LLM API недоступен / n8n не отвечает | Проверить `curl http://192.168.10.182:5678/healthz` |
+| `ankicards push` → ConnectTimeout | Комп выключен / Anki не запущен / Tailscale не подключён | Включить комп, открыть Anki, проверить `curl http://<tailscale-anki-ip>:8765` |
+| Cron `exit code 1` | LLM API недоступен / n8n не отвечает | Проверить `curl http://<n8n-host>:5678/healthz` |
 | `review` не работает в моём терминале | `questionary` требует TTY | Запустить `ankicards review` в интерактивном терминале пользователя |
-| Уведомление в Telegram не пришло | n8n workflow упал | Проверить executions: `curl http://192.168.10.182:5678/api/v1/executions?workflowId=8MhBd9pXSOLG5rVh` |
+| Уведомление в Telegram не пришло | n8n workflow упал | Проверить executions: `curl http://<n8n-host>:5678/api/v1/executions?workflowId=<workflow-id>` |
 | `get_language('xx')` → FileNotFoundError | Нет `languages/xx/language.yaml` | Создать по образцу |
 | `load_prompt` не находит промпт в языке | Промпт не скопирован в `languages/{code}/prompts/` | `cp prompts/*.md languages/{code}/prompts/` |
 | Жирный текст не работает в Telegram | parse_mode: Markdown не совместим с некоторыми символами | Использовать HTML-теги или экранировать спецсимволы |
@@ -389,14 +422,14 @@ pytest tests/ -v
 ruff check src/ && mypy src/
 
 # Проверить, доступен ли Anki
-curl -m 5 http://100.84.155.42:8765 -d '{"action":"version","version":6}'
+curl -m 5 http://<tailscale-anki-ip>:8765 -d '{"action":"version","version":6}'
 
 # Проверить конфиг языка
 python -c "from ankicards.config import get_language; l=get_language('nb'); print(l.name, l.code)"
 python -c "from ankicards.config import get_language; l=get_language('de'); print(l.forms['noun'])"
 
 # Проверить n8n webhook
-curl -X POST http://192.168.10.182:5678/webhook/ankicards-notify -H 'Content-Type: application/json' -d '{"text":"test"}'
+curl -X POST http://<n8n-host>:5678/webhook/ankicards-notify -H 'Content-Type: application/json' -d '{"text":"test"}'
 ```
 
 ---

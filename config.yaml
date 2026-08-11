@@ -58,8 +58,11 @@ tts:
   pitch: "+0Hz"
 
 images:
-  # Unsplash API (опционально, можно отключить)
+  # Поиск картинок (опционально, можно отключить)
   enabled: true
+  # Провайдер: unsplash | pexels | pixabay | openverse
+  # Ключ нужного провайдера — в .env (см. .env.example). openverse ключа не требует.
+  provider: unsplash
   per_page: 5                    # сколько вариантов показывать на ревью
   # Качаем только для конкретных существительных (не абстрактных)
   only_for_pos: [noun]

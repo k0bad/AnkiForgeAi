@@ -16,7 +16,7 @@ Built-in languages: 🇳🇴 Norwegian Bokmål (`nb`), 🇩🇪 German (`de`), �
    - from a URL (web page extraction + LLM parsing)
 2. **Enrich** — adds grammar forms, translation, example sentences.
 3. **Dedupe** — checks duplicates against existing Anki notes and staging DB.
-4. **Media** — generates mp3 audio (edge-tts) and downloads images (Unsplash).
+4. **Media** — generates mp3 audio (edge-tts) and downloads images (pick a provider: Unsplash, Pexels, Pixabay, or key-free Openverse).
 5. **Review** — interactive review of ambiguous candidates (CLI).
 6. **Push** — sends approved cards to Anki via AnkiConnect.
 
@@ -28,7 +28,7 @@ Built-in languages: 🇳🇴 Norwegian Bokmål (`nb`), 🇩🇪 German (`de`), �
 | **SQLite** as staging + audit + cache | Anki = source of truth, SQLite = local index + history |
 | **`forms` as JSON** | Different schemas for nouns/verbs/adjectives per language |
 | **edge-tts** over gTTS | Microsoft neural voices, free, per-language quality |
-| **Unsplash API** | Legal, free (50 req/hour), real photos |
+| **Pluggable image provider** | `images.provider`: Unsplash, Pexels, Pixabay, or key-free Openverse — legal, free tiers |
 | **Prompts in `prompts/*.md`** | Improve card quality without touching code |
 | **Any LLM provider** | OpenRouter or Anthropic Claude |
 
@@ -141,13 +141,16 @@ python scripts/daily_topic.py --dry-run
 # Override topic and count
 python scripts/daily_topic.py --topic dyr --count 5 --no-push
 
-# Full cycle incl. Telegram notification via n8n webhook — use this for cron
+# Full cycle incl. notifications (config.yaml -> notifications:) — use this for cron
 ./scripts/daily_topic.sh
 ```
 
-`daily_topic.py` alone does not send notifications — `daily_topic.sh` wraps it and
-forwards its output to an n8n webhook. Set up `daily_topic.sh` as a cron job for
-hands-free daily vocabulary generation with Telegram delivery.
+`daily_topic.py` alone does not send notifications — pass `--notify` (which is what
+`daily_topic.sh` does) to fan the report out to every enabled channel in
+`config.yaml -> notifications:`. Today that's a generic `webhook` backend (POST JSON to
+any URL — n8n, Zapier, a custom bot gateway); see `src/ankicards/notify/`. Set up
+`daily_topic.sh` as a cron job for hands-free daily vocabulary generation with delivery
+to your configured channel.
 
 ## Project Structure
 
@@ -170,7 +173,7 @@ src/ankicards/
 │   └── pronunciation.py   # Pronunciation hints
 ├── media/
 │   ├── tts.py             # edge-tts audio
-│   └── images.py          # Unsplash images
+│   └── images.py          # Image search: unsplash/pexels/pixabay/openverse
 ├── anki/
 │   ├── connect.py         # HTTP client for AnkiConnect
 │   ├── sync.py            # Anki → cache sync
@@ -194,7 +197,7 @@ media/                     # Audio, images (gitignored)
 - [x] Dedupe (rapidfuzz)
 - [x] Grammar enrichment
 - [x] edge-tts audio
-- [x] Unsplash images
+- [x] Pluggable image providers (Unsplash / Pexels / Pixabay / Openverse)
 - [x] AnkiConnect push & sync
 - [x] Interactive review CLI
 - [x] Full auto cycle (cron + auto-accept + push + notify)

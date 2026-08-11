@@ -66,6 +66,7 @@ class TTSConfig(BaseModel):
 
 class ImagesConfig(BaseModel):
     enabled: bool = True
+    provider: str = "unsplash"  # "unsplash" | "pexels" | "pixabay" | "openverse"
     per_page: int = 5
     only_for_pos: list[str] = Field(default_factory=lambda: ["noun"])
     max_size_kb: int = 500
@@ -180,6 +181,8 @@ class Secrets(BaseSettings):
     anthropic_api_key: str = ""
     openrouter_api_key: str = ""
     unsplash_access_key: str = ""
+    pexels_api_key: str = ""
+    pixabay_api_key: str = ""
 
 
 # ───────────── API ─────────────

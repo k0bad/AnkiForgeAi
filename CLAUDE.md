@@ -48,7 +48,7 @@ Dedupe (rapidfuzz)            → Decision(new | review | merge | skip)
    ↓                            review/merge → status=review, waits for Review
 Enrich (grammar/example)      → Card + forms, example, example_translation
    ↓
-Media (edge-tts / Unsplash)   → Card + audio, image (filenames only)
+Media (edge-tts / image provider) → Card + audio, image (filenames only)
    ↓
 DB save                       → status=approved
    ↓
@@ -75,7 +75,7 @@ Review can interrupt at any stage — user sees pending/review cards and accepts
 | `ingest/topic.py` | Calls Claude with `prompts/topic_words.md` → `list[Card]` |
 | `enrich/grammar.py` | Calls Claude with `prompts/grammar_forms.md` → populates `card.forms` |
 | `media/tts.py` | edge-tts → `{card.id}_nb.mp3` in `media/audio/` |
-| `media/images.py` | Unsplash → `{card.id}.jpg` in `media/images/` (nouns only) |
+| `media/images.py` | Provider from `images.provider` (unsplash/pexels/pixabay/openverse) → `{card.id}.jpg` in `media/images/` (nouns only) |
 | `review/interactive.py` | rich + questionary terminal UI |
 
 ## Principles
@@ -98,6 +98,7 @@ Key settings to know:
 - `llm.provider` / `llm.model`: default is `openrouter` / `deepseek/deepseek-v4-flash`; set `provider: anthropic` + a `claude-*` model to use Claude instead
 - `dedupe.fuzzy_threshold_review: 85` — score ≥ 85 → mandatory review; 70–84 → semiauto
 - `tts.voice_female` / `tts.voice_male` — come from the active language profile by default (`languages/{code}/language.yaml` → `tts:`); override in `config.yaml` to pin a different voice
+- `images.provider: unsplash | pexels | pixabay | openverse` — search backend for `media/images.py`; matching API key goes in `.env` (`UNSPLASH_ACCESS_KEY` / `PEXELS_API_KEY` / `PIXABAY_API_KEY`), `openverse` needs none
 - `images.only_for_pos: [noun]` — images generated only for nouns
 - `enrich.grammar` / `enrich.examples` / `enrich.pronunciation` — toggle individual enrichment stages (set by `ankiforgeai setup`)
 
