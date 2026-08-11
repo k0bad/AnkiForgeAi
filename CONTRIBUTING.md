@@ -5,8 +5,8 @@ Thanks for your interest in contributing!
 ## Quick Start
 
 ```bash
-git clone https://github.com/Kobets1/anki.git
-cd anki
+git clone https://github.com/k0bad/AnkiForgeAi.git
+cd AnkiForgeAi
 uv pip install -e ".[dev]"
 cp .env.example .env   # add your API keys
 pytest tests/ -v        # run tests

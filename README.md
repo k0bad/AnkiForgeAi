@@ -179,6 +179,9 @@ src/ankicards/
 │   ├── connect.py         # HTTP client for AnkiConnect
 │   ├── sync.py            # Anki → cache sync
 │   └── notetype.py        # Note type definition
+├── notify/
+│   ├── base.py            # Notifier protocol
+│   └── webhook.py         # Generic webhook backend (n8n, Zapier, ...)
 └── review/
     └── interactive.py     # Rich + questionary UI
 
