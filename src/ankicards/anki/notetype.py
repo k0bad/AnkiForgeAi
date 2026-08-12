@@ -4,16 +4,21 @@
 читаются из languages/{code}/language.yaml через LanguageConfig.
 Никакого хардкода под конкретный язык.
 
-Поля (универсальные):
-    Word, Pronunciation, Translation, Example, ExampleTranslation,
-    POS, Forms, Image, Audio, Level, Topic, ID
+Набор полей Note Type декларативен (NoteFieldDef в config.py):
+    language.yaml -> anki.fields: [...] переопределяет DEFAULT_FIELDS ниже.
+    Каждое поле ссылается на источник данных через FIELD_RESOLVERS.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from html import escape
 
-from ..config import EN_BACK_LABELS, LanguageConfig, get_config, get_language
+from ..config import EN_BACK_LABELS, LanguageConfig, NoteFieldDef, get_config, get_language
 from ..models import Card
+
+
+class NoteTypeConfigError(Exception):
+    """Некорректная схема полей Note Type в language.yaml (anki.fields)."""
 
 
 def _current_language() -> LanguageConfig:
@@ -22,15 +27,79 @@ def _current_language() -> LanguageConfig:
 
 
 def _get_note_type_name() -> str:
-    return _current_language().anki.get("note_type", "LanguageCard")
+    return _current_language().anki.note_type
 
 
 NOTE_TYPE_NAME_PROP = property(lambda self: _get_note_type_name())  # псевдо-константа
 
 
-FIELDS = [
-    "Word", "Pronunciation", "Translation", "Example", "ExampleTranslation",
-    "POS", "Forms", "Image", "Audio", "Level", "Topic", "ID",
+# ───────────── Схема полей по умолчанию ─────────────
+# Буквальное описание сегодняшних 12 полей — вывод field_names()/front_template()/
+# _build_back_template() для языка без своего anki.fields побайтово идентичен
+# захардкоженной версии, которая была до этого рефакторинга.
+
+
+# ВАЖНО: порядок списка — это и inOrderFields (field_names()), и порядок секций
+# на бэке (_build_back_template() рендерит section-поля в порядке этого списка).
+# Оригинальный _build_back_template() (до рефакторинга) был захардкожен в порядке
+# Translation -> POS -> Pronunciation -> Forms -> Example -> ExampleTranslation —
+# НЕ в порядке старой константы FIELDS (Word, Pronunciation, Translation, ...).
+# Здесь порядок выбран под визуальный вывод карточки (CSS/шаблоны — то, что
+# реально видит пользователь), а не под старый порядок FIELDS, который менял
+# только порядок полей в редакторе заметок Anki (косметика, не влияет на рендер).
+DEFAULT_FIELDS: list[NoteFieldDef] = [
+    NoteFieldDef(name="Word", source="word", slot="front_title", css_class="word"),
+    NoteFieldDef(
+        name="Translation",
+        source="translation",
+        slot="section",
+        label_key="translation",
+        css_class="translation",
+    ),
+    NoteFieldDef(
+        name="POS",
+        source="pos_label",
+        slot="section",
+        label_key="part_of_speech",
+        css_class="pos",
+    ),
+    NoteFieldDef(
+        name="Pronunciation",
+        source="pronunciation",
+        slot="section",
+        optional=True,
+        label_key="pronunciation",
+        css_class="pronunciation-ru",
+    ),
+    NoteFieldDef(
+        name="Forms",
+        source="forms_html",
+        slot="section",
+        optional=True,
+        label_key="grammar",
+        css_class="forms",
+    ),
+    NoteFieldDef(
+        name="Example",
+        source="example",
+        slot="section",
+        optional=True,
+        label_key="example",
+        css_class="example",
+    ),
+    NoteFieldDef(
+        name="ExampleTranslation",
+        source="example_translation",
+        slot="section",
+        optional=True,
+        label_key="example_translation",
+        css_class="example-translation",
+    ),
+    NoteFieldDef(name="Image", source="image_html", slot="front_image", css_class="card-image"),
+    NoteFieldDef(name="Audio", source="audio_html", slot="front_audio", css_class="audio"),
+    NoteFieldDef(name="Level", source="level", slot="tag"),
+    NoteFieldDef(name="Topic", source="topic", slot="tag"),
+    NoteFieldDef(name="ID", source="id", slot="hidden"),
 ]
 
 CSS = """.card {
@@ -63,9 +132,77 @@ CSS = """.card {
 .tags { margin-top: 20px; font-size: 12px; color: #a0aec0; }
 .tag { display: inline-block; background: #edf2f7; padding: 1px 8px; border-radius: 3px; margin-right: 4px; }"""  # noqa: E501
 
-FRONT_TEMPLATE = """<div class="word">{{Word}}</div>
-{{#Audio}}<div class="audio">{{Audio}}</div>{{/Audio}}
-{{#Image}}<div class="card-image">{{Image}}</div>{{/Image}}"""
+
+# ───────────── Резолвинг активной схемы полей ─────────────
+
+
+def _active_fields() -> list[NoteFieldDef]:
+    """Схема полей активного языка: anki.fields из language.yaml, иначе DEFAULT_FIELDS."""
+    fields = _current_language().anki.fields
+    fields = fields if fields is not None else DEFAULT_FIELDS
+    _validate_fields(fields)
+    return fields
+
+
+def _validate_fields(fields: list[NoteFieldDef]) -> None:
+    lang_code = _current_language().code
+    names = [f.name for f in fields]
+    if len(names) != len(set(names)):
+        raise NoteTypeConfigError(
+            f"Duplicate field names in anki.fields for language {lang_code!r}: {names}"
+        )
+
+    unique_slots = ("front_title", "front_audio", "front_image")
+    seen: dict[str, str] = {}
+    for field in fields:
+        if field.source not in FIELD_RESOLVERS:
+            raise NoteTypeConfigError(
+                f"Unknown field source {field.source!r} for field {field.name!r} "
+                f"in language {lang_code!r}. Known sources: {sorted(FIELD_RESOLVERS)}"
+            )
+        if field.slot in unique_slots:
+            if field.slot in seen:
+                raise NoteTypeConfigError(
+                    f"Slot {field.slot!r} is claimed by both {seen[field.slot]!r} and "
+                    f"{field.name!r} in language {lang_code!r} — only one field per slot allowed"
+                )
+            seen[field.slot] = field.name
+
+
+def validate_active_fields() -> None:
+    """Проверить схему полей активного языка заранее (вызывается из `ankiforgeai init`),
+    чтобы опечатка в anki.fields ловилась при инициализации, а не в середине enrichment."""
+    _active_fields()
+
+
+def field_names() -> list[str]:
+    """Имена полей Note Type в порядке объявления — для AnkiConnect createModel."""
+    return [f.name for f in _active_fields()]
+
+
+def front_template() -> str:
+    """HTML фронта карточки: front_title (всегда), затем front_audio/front_image (guarded)."""
+    front_slots = ("front_title", "front_audio", "front_image")
+    by_slot: dict[str, NoteFieldDef] = {
+        f.slot: f for f in _active_fields() if f.slot in front_slots
+    }
+    parts: list[str] = []
+
+    title = by_slot.get("front_title")
+    if title is not None:
+        css_class = title.css_class or title.name.lower()
+        parts.append(f'<div class="{css_class}">{{{{{title.name}}}}}</div>')
+
+    for slot, css_default in (("front_audio", "audio"), ("front_image", "card-image")):
+        field = by_slot.get(slot)
+        if field is None:
+            continue
+        css_class = field.css_class or css_default
+        guard_open, guard_close = f"{{{{#{field.name}}}}}", f"{{{{/{field.name}}}}}"
+        inner = f'<div class="{css_class}">{{{{{field.name}}}}}</div>'
+        parts.append(f"{guard_open}{inner}{guard_close}")
+
+    return "\n".join(parts)
 
 
 def _back_labels() -> dict[str, str]:
@@ -76,29 +213,33 @@ def _back_labels() -> dict[str, str]:
 
 
 def _build_back_template() -> str:
-    """Динамически генерирует BACK_TEMPLATE из language.back_labels."""
+    """Динамически генерирует BACK_TEMPLATE из активной схемы полей."""
     L = _back_labels()  # noqa: N806
-    parts = [
-        '<hr id=answer>',
-        f'<div class="section"><div class="label">{L.get("translation","Translation")}</div><div class="translation">{{{{Translation}}}}</div></div>',  # noqa: E501
-        f'<div class="section"><div class="label">{L.get("part_of_speech","Part of Speech")}</div><div class="pos">{{{{POS}}}}</div></div>',  # noqa: E501
-        '{{#Pronunciation}}',
-        f'<div class="section"><div class="label">{L.get("pronunciation","Pronunciation")}</div><div class="pronunciation-ru">{{{{Pronunciation}}}}</div></div>',  # noqa: E501
-        '{{/Pronunciation}}',
-        '{{#Forms}}',
-        f'<div class="section"><div class="label">{L.get("grammar","Grammar")}</div><div class="forms">{{{{Forms}}}}</div></div>',  # noqa: E501
-        '{{/Forms}}',
-        '{{#Example}}',
-        f'<div class="section"><div class="label">{L.get("example","Example")}</div><div class="example">{{{{Example}}}}</div></div>',  # noqa: E501
-        '{{/Example}}',
-        '{{#ExampleTranslation}}',
-        f'<div class="section"><div class="label">{L.get("example_translation","Example Translation")}</div><div class="example-translation">{{{{ExampleTranslation}}}}</div></div>',  # noqa: E501
-        '{{/ExampleTranslation}}',
-        '<div class="tags">',
-        '{{#Level}}<span class="tag">{{Level}}</span>{{/Level}}',
-        '{{#Topic}}<span class="tag">{{Topic}}</span>{{/Topic}}',
-        '</div>',
-    ]
+    section_parts: list[str] = []
+    tag_parts: list[str] = []
+
+    for field in _active_fields():
+        if field.slot == "section":
+            label_key = field.label_key or field.name.lower()
+            css_class = field.css_class or field.name.lower()
+            label = L.get(label_key, EN_BACK_LABELS.get(label_key, field.name))
+            div = (
+                f'<div class="section"><div class="label">{label}</div>'
+                f'<div class="{css_class}">{{{{{field.name}}}}}</div></div>'
+            )
+            if field.optional:
+                section_parts.append(f"{{{{#{field.name}}}}}")
+                section_parts.append(div)
+                section_parts.append(f"{{{{/{field.name}}}}}")
+            else:
+                section_parts.append(div)
+        elif field.slot == "tag":
+            guard_open, guard_close = f"{{{{#{field.name}}}}}", f"{{{{/{field.name}}}}}"
+            pill = f'<span class="tag">{{{{{field.name}}}}}</span>'
+            tag_parts.append(f"{guard_open}{pill}{guard_close}")
+        # front_title / front_audio / front_image / hidden — на бэке не показываются
+
+    parts = ["<hr id=answer>", *section_parts, '<div class="tags">', *tag_parts, "</div>"]
     return "\n".join(parts)
 
 
@@ -157,30 +298,85 @@ def _render_forms_html(pos_value: str, forms: dict | None) -> str:
     return "".join(parts)
 
 
+# ───────────── Резолверы источников данных (NoteFieldDef.source) ─────────────
+
+
+def _resolve_word(card: Card) -> str:
+    return escape(card.word)
+
+
+def _resolve_pronunciation(card: Card) -> str:
+    return escape(card.pronunciation or "")
+
+
+def _resolve_translation(card: Card) -> str:
+    return escape(card.translation)
+
+
+def _resolve_example(card: Card) -> str:
+    return escape(card.example or "")
+
+
+def _resolve_example_translation(card: Card) -> str:
+    return escape(card.example_translation or "")
+
+
+def _resolve_pos_label(card: Card) -> str:
+    return escape(pos_label(card.pos.value)) if card.pos else ""
+
+
+def _resolve_forms_html(card: Card) -> str:
+    return _render_forms_html(card.pos.value, card.forms)
+
+
+def _resolve_image_html(card: Card) -> str:
+    return f'<img src="{escape(card.image)}">' if card.image else ""
+
+
+def _resolve_audio_html(card: Card) -> str:
+    return f"[sound:{card.audio}]" if card.audio else ""
+
+
+def _resolve_level(card: Card) -> str:
+    return escape(card.level.value.upper() if card.level else "")
+
+
+def _resolve_topic(card: Card) -> str:
+    return escape(card.topic or "")
+
+
+def _resolve_id(card: Card) -> str:
+    return card.id
+
+
+FIELD_RESOLVERS: dict[str, Callable[[Card], str]] = {
+    "word": _resolve_word,
+    "pronunciation": _resolve_pronunciation,
+    "translation": _resolve_translation,
+    "example": _resolve_example,
+    "example_translation": _resolve_example_translation,
+    "pos_label": _resolve_pos_label,
+    "forms_html": _resolve_forms_html,
+    "image_html": _resolve_image_html,
+    "audio_html": _resolve_audio_html,
+    "level": _resolve_level,
+    "topic": _resolve_topic,
+    "id": _resolve_id,
+}
+
+
 def card_to_anki_fields(card: Card) -> dict[str, str]:
     """Конвертировать Card → словарь полей для AnkiConnect addNote.
 
-    Текстовые поля экранируются: Anki рендерит {{Field}} как сырой HTML в
-    webview, а значения (word/translation/example) могут в итоге восходить
-    к LLM-обработке чужого веб-контента (ingest url) — без escape() это был
-    бы вектор stored-HTML/JS-инъекции в карточку.
+    Текстовые поля экранируются резолверами в FIELD_RESOLVERS: Anki рендерит
+    {{Field}} как сырой HTML в webview, а значения (word/translation/example)
+    могут в итоге восходить к LLM-обработке чужого веб-контента (ingest url) —
+    без escape() это был бы вектор stored-HTML/JS-инъекции в карточку.
+    Image/Audio — единственные источники, которые намеренно возвращают сырой
+    HTML (img-тег, [sound:]).
     """
-    audio_field = f"[sound:{card.audio}]" if card.audio else ""
-    image_field = f'<img src="{escape(card.image)}">' if card.image else ""
-    forms_html = _render_forms_html(card.pos.value, card.forms)
-    pos_display = pos_label(card.pos.value) if card.pos else ""
-
-    return {
-        "Word": escape(card.word),
-        "Pronunciation": escape(card.pronunciation or ""),
-        "Translation": escape(card.translation),
-        "Example": escape(card.example or ""),
-        "ExampleTranslation": escape(card.example_translation or ""),
-        "POS": escape(pos_display),
-        "Forms": forms_html,
-        "Image": image_field,
-        "Audio": audio_field,
-        "Level": escape(card.level.value.upper() if card.level else ""),
-        "Topic": escape(card.topic or ""),
-        "ID": card.id,
-    }
+    result: dict[str, str] = {}
+    for field in _active_fields():
+        resolver = FIELD_RESOLVERS[field.source]
+        result[field.name] = resolver(card)
+    return result

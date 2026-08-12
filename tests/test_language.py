@@ -12,7 +12,7 @@ def test_load_norwegian_language():
     assert len(lang.forms["noun"]) == 5
     assert lang.forms["noun"][0]["key"] == "gender"
     assert lang.tts["voice_female"] == "nb-NO-PernilleNeural"
-    assert lang.anki["deck_name"] == "Norsk"
+    assert lang.anki.deck_name == "Norsk"
     assert lang.back_labels["translation"] == "Перевод"
 
 
@@ -30,7 +30,7 @@ def test_load_german_language():
     assert "dative" in noun_keys
     assert "accusative" in noun_keys
     assert lang.tts["voice_male"] == "de-DE-ConradNeural"
-    assert lang.anki["deck_name"] == "Deutsch"
+    assert lang.anki.deck_name == "Deutsch"
 
 
 def test_language_prompts_directory():
