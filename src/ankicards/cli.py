@@ -20,7 +20,14 @@ from rich.console import Console
 from rich.table import Table
 
 from .anki.connect import AnkiConnect
-from .anki.notetype import CSS, FIELDS, FRONT_TEMPLATE, back_template
+from .anki.notetype import (
+    CSS,
+    NoteTypeConfigError,
+    back_template,
+    field_names,
+    front_template,
+    validate_active_fields,
+)
 from .anki.notetype import _get_note_type_name as get_note_type_name
 from .anki.sync import sync_anki_to_cache
 from .config import get_config
@@ -61,6 +68,13 @@ def setup() -> None:
 def init() -> None:
     """Создать БД и Note Type в Anki."""
     cfg = get_config()
+
+    try:
+        validate_active_fields()
+    except NoteTypeConfigError as e:
+        console.print(f"[red]✗[/] Некорректная схема полей (anki.fields в language.yaml): {e}")
+        raise typer.Exit(code=1) from e
+
     Database(cfg.paths.db)
     console.print(f"[green]✓[/] БД создана: {cfg.paths.db}")
 
@@ -84,10 +98,10 @@ def init() -> None:
 
         await anki.create_model(
             model_name=note_type,
-            fields=FIELDS,
+            fields=field_names(),
             css=CSS,
             card_templates=[
-                {"Name": "Recognition", "Front": FRONT_TEMPLATE, "Back": back_template()}
+                {"Name": "Recognition", "Front": front_template(), "Back": back_template()}
             ],
         )
         console.print(f"[green]✓[/] Note Type создан: {note_type}")

@@ -458,7 +458,40 @@ curl -X POST http://<n8n-host>:5678/webhook/ankicards-notify -H 'Content-Type: a
 - [ ] Публикация в PyPI — пакет/workflow готовы (см. §12), не хватает только разовой ручной регистрации trusted publisher на pypi.org и первого `git push origin vX.Y.Z`
 - [x] LICENSE (MIT)
 - [x] CHANGELOG
-- [ ] Конфигурируемый Note Type — имя (`anki.note_type`) уже берётся из языкового профиля, но набор полей (`FIELDS` в `anki/notetype.py`, сейчас фиксированные 12) всё ещё захардкожен
+- [x] Конфигурируемый Note Type — набор полей теперь декларативен (`anki.fields` в `language.yaml`), см. пример ниже. Без переопределения используется `DEFAULT_FIELDS` (те же 12 полей, что и раньше).
+
+### Декларативная схема полей Note Type (`anki.fields`)
+
+`language.yaml -> anki.fields:` — список полей Note Type. Каждое поле ссылается на
+источник данных через `source` (реестр `FIELD_RESOLVERS` в `anki/notetype.py`) и
+задаёт своё место на карточке через `slot`:
+
+- `front_title` / `front_audio` / `front_image` — фронт карточки (максимум одно поле на слот)
+- `section` — подписанный блок на бэке (порядок = порядок полей в списке)
+- `tag` — пилюля в блоке тегов на бэке
+- `hidden` — не рендерится нигде (например `ID`, для поиска/дедупликации)
+
+```yaml
+anki:
+  deck_name: MyDeck
+  note_type: LanguageCard
+  fields:
+    - {name: Word, source: word, slot: front_title}
+    - {name: Translation, source: translation, slot: section, label_key: translation}
+    - {name: Audio, source: audio_html, slot: front_audio}
+```
+
+Доступные `source`: `word`, `pronunciation`, `translation`, `example`,
+`example_translation`, `pos_label`, `forms_html`, `image_html`, `audio_html`,
+`level`, `topic`, `id`. Кастомное поле может ссылаться только на уже существующий
+источник — новая сущность (например «Synonyms») требует нового атрибута `Card` и
+отдельного этапа enrichment, это отдельная задача.
+
+Опечатка в `source` или два поля с одним и тем же уникальным слотом (`front_title`
+и т.п.) ловятся сразу при `ankiforgeai init` (`NoteTypeConfigError`), а не посреди
+enrichment. **Важно:** `init` создаёт Note Type только один раз — если он уже
+существует в Anki, изменение `anki.fields` не добавит/не уберёт поля в уже
+созданном Note Type, пока его не пересоздать вручную в Anki.
 
 ---
 
