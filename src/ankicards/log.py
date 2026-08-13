@@ -5,8 +5,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import sys
+import uuid
+from collections.abc import Iterator
 from typing import cast
 
 import structlog
@@ -25,6 +28,7 @@ def setup_logging() -> None:
     logging.getLogger("trafilatura").setLevel(logging.WARNING)
 
     shared_processors: list[structlog.types.Processor] = [
+        structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.TimeStamper(fmt="iso"),
@@ -60,6 +64,22 @@ def setup_logging() -> None:
 def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
     """Получить structlog-логгер."""
     return cast(structlog.stdlib.BoundLogger, structlog.get_logger(name or __name__))
+
+
+@contextlib.contextmanager
+def bound_run(command: str) -> Iterator[str]:
+    """Привязать run_id и имя команды к контексту логов на время одного CLI-запуска.
+
+    run_id попадает во все structlog-записи через merge_contextvars и в audit_log
+    через Database.log_action (читает его из тех же contextvars), так что оба
+    источника трассировки можно связать по одному идентификатору запуска.
+    """
+    run_id = uuid.uuid4().hex[:8]
+    structlog.contextvars.bind_contextvars(run_id=run_id, command=command)
+    try:
+        yield run_id
+    finally:
+        structlog.contextvars.clear_contextvars()
 
 
 # Auto-setup при первом импорте

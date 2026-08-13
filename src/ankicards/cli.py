@@ -34,6 +34,7 @@ from .config import get_config
 from .db import Database
 from .ingest.topic import ingest_by_topic
 from .ingest.url import ingest_from_url
+from .log import bound_run
 from .models import Status
 from .pipeline import push_approved, run_ingest_pipeline
 from .review.interactive import review_pending
@@ -106,7 +107,8 @@ def init() -> None:
         )
         console.print(f"[green]✓[/] Note Type создан: {note_type}")
 
-    asyncio.run(_run())
+    with bound_run("init"):
+        asyncio.run(_run())
 
 
 @ingest_app.command("url")
@@ -126,7 +128,8 @@ def ingest_url_cmd(
         stats = await run_ingest_pipeline(cards, db=db, cfg=cfg)
         _print_stats(stats)
 
-    asyncio.run(_run())
+    with bound_run("ingest_url"):
+        asyncio.run(_run())
 
 
 @ingest_app.command("topic")
@@ -147,7 +150,8 @@ def ingest_topic_cmd(
         stats = await run_ingest_pipeline(cards, db=db, cfg=cfg)
         _print_stats(stats)
 
-    asyncio.run(_run())
+    with bound_run("ingest_topic"):
+        asyncio.run(_run())
 
 
 @app.command()
@@ -155,7 +159,8 @@ def review() -> None:
     """Интерактивный ревью pending-карточек."""
     cfg = get_config()
     db = Database(cfg.paths.db)
-    review_pending(db, cfg)
+    with bound_run("review"):
+        review_pending(db, cfg)
 
 
 @app.command()
@@ -169,7 +174,8 @@ def push() -> None:
         count = await push_approved(db, anki, cfg)
         console.print(f"[green]✓[/] Отправлено в Anki: {count}")
 
-    asyncio.run(_run())
+    with bound_run("push"):
+        asyncio.run(_run())
 
 
 @app.command()
@@ -183,7 +189,8 @@ def sync() -> None:
         count = await sync_anki_to_cache(db, anki, cfg)
         console.print(f"[green]✓[/] Синхронизировано заметок: {count}")
 
-    asyncio.run(_run())
+    with bound_run("sync"):
+        asyncio.run(_run())
 
 
 @app.command()
