@@ -23,6 +23,7 @@ from rich.table import Table
 
 from .anki.connect import AnkiConnect
 from .anki.notetype import (
+    CARD_TEMPLATE_NAME,
     CSS,
     NoteTypeConfigError,
     back_template,
@@ -96,17 +97,23 @@ def init() -> None:
         console.print(f"[green]✓[/] Deck готов: {cfg.anki.deck_name}")
 
         note_type = get_note_type_name()
+        front, back = front_template(), back_template()
         if note_type in await anki.model_names():
-            console.print(f"[green]✓[/] Note Type уже существует: {note_type}")
+            # Note Type уже существует — createModel тут не поможет (разовая операция),
+            # поэтому дизайн (front_template/back_template/CSS) синхронизируем отдельными
+            # вызовами, иначе правки в notetype.py никогда не долетают до Anki.
+            await anki.update_model_templates(
+                note_type, {CARD_TEMPLATE_NAME: {"Front": front, "Back": back}}
+            )
+            await anki.update_model_styling(note_type, CSS)
+            console.print(f"[green]✓[/] Note Type обновлён (дизайн синхронизирован): {note_type}")
             return
 
         await anki.create_model(
             model_name=note_type,
             fields=field_names(),
             css=CSS,
-            card_templates=[
-                {"Name": "Recognition", "Front": front_template(), "Back": back_template()}
-            ],
+            card_templates=[{"Name": CARD_TEMPLATE_NAME, "Front": front, "Back": back}],
         )
         console.print(f"[green]✓[/] Note Type создан: {note_type}")
 

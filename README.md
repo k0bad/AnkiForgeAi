@@ -100,6 +100,8 @@ ankiforgeai init              # creates the local DB and the Anki Note Type
 
 `config.yaml`, `data/`, and `media/` are created in whatever directory you run `ankiforgeai` from — `cd` into a project folder first (e.g. `mkdir ~/ankiforgeai && cd ~/ankiforgeai`).
 
+`init` is safe to re-run: if the Note Type already exists in Anki, it pushes the current card templates and CSS to it instead of skipping, so re-run it after pulling an update that changes the card design.
+
 ### From source (contributors)
 
 ```bash

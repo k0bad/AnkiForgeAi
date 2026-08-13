@@ -23,11 +23,14 @@ ankiforgeai sync
 ankiforgeai stats
 ankiforgeai setup           # interactive wizard: pick language, provider, Anki URL → writes config.yaml
 
-# One-time setup (run after install)
+# Setup (run after install; safe to re-run)
 ankiforgeai init                    # creates the SQLite schema + the LanguageCard note type in Anki
                                      # (name comes from languages/{language}/language.yaml anki.note_type,
                                      #  must match anki.note_type in config.yaml; requires Anki running
-                                     #  with AnkiConnect for the note-type half)
+                                     #  with AnkiConnect for the note-type half). If the note type already
+                                     # exists, re-running pushes the current front/back templates + CSS
+                                     # (updateModelTemplates/updateModelStyling) instead of a no-op — rerun
+                                     # after editing anki/notetype.py or anki.fields to sync the card design.
 
 # Dev
 ruff check src/
