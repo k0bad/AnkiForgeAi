@@ -134,3 +134,18 @@ class Decision(BaseModel):
     decision: DecisionType
     matches: list[DuplicateMatch] = Field(default_factory=list)
     reason: str | None = None
+
+
+# ───────────────────────── Inconsistency ─────────────────────────
+
+
+class Inconsistency(BaseModel):
+    """Найденное doctor-проверкой расхождение между включённым тумблером
+    enrichment-конфига и фактическими данными карточки."""
+
+    card_id: str
+    word: str
+    # "enrich.grammar" | "enrich.examples" | "enrich.pronunciation"
+    # | "images.enabled" | "anki_note_id"
+    check: str
+    reason: str
