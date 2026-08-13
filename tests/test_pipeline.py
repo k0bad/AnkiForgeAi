@@ -94,6 +94,23 @@ async def test_exact_duplicate_is_merged_not_saved(tmp_path: Path, db: Database)
     assert db.get_by_status(Status.APPROVED) == []
 
 
+async def test_duplicate_within_same_batch_is_merged_not_both_saved(
+    tmp_path: Path, db: Database
+) -> None:
+    """Регрессия на #13: LLM вернул одно и то же слово дважды в одном ответе —
+    второе должно поймать первое как дубликат, а не проскочить как "new",
+    т.к. первое ещё не успело попасть в БД (insert только в конце функции)."""
+    cfg = _make_config(tmp_path)
+
+    stats = await pipeline.run_ingest_pipeline(
+        [_card("hus"), _card("Hus")], db=db, cfg=cfg, auto_enrich=False
+    )
+
+    assert stats["new"] == 1
+    assert stats["merged"] == 1
+    assert len(db.get_by_status(Status.APPROVED)) == 1
+
+
 async def test_enrich_flags_gate_which_stages_run(
     tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:

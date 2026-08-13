@@ -36,11 +36,24 @@ def _normalize(word: str) -> str:
     return normalized
 
 
-def check_card(card: Card, db: Database, cfg: Config) -> Decision:
-    """Проверить одного кандидата."""
+def check_card(
+    card: Card,
+    db: Database,
+    cfg: Config,
+    batch_candidates: list[tuple[str, str]] | None = None,
+) -> Decision:
+    """Проверить одного кандидата.
+
+    `batch_candidates` — (id, word) карточек, уже принятых в этом же прогоне
+    ingest, но ещё не вставленных в БД (insert для "new" карточек происходит
+    только в конце run_ingest_pipeline) — без них дубликаты внутри одного
+    батча (например, LLM дважды вернул похожее слово) остаются незамеченными.
+    """
     staging = db.all_words()
     anki_cache = [(str(nid), w) for nid, w in db.all_anki_words()]
-    candidates = [c for c in staging + anki_cache if c[0] != card.id]
+    candidates = [
+        c for c in staging + anki_cache + (batch_candidates or []) if c[0] != card.id
+    ]
 
     if not candidates:
         return Decision(decision="new")

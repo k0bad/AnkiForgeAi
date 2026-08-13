@@ -37,8 +37,9 @@ async def run_ingest_pipeline(
     stats = {"new": 0, "review": 0, "merged": 0, "enriched": 0, "audio": 0, "errors": 0}
 
     accepted: list[Card] = []
+    accepted_candidates: list[tuple[str, str]] = []
     for card in cards:
-        decision = check_card(card, db, cfg)
+        decision = check_card(card, db, cfg, batch_candidates=accepted_candidates)
         decision = await judge_review(card, decision, cfg)
         if decision.decision == "merge":
             db.log_action(
@@ -66,6 +67,7 @@ async def run_ingest_pipeline(
             stats["review"] += 1
             continue
         accepted.append(card)
+        accepted_candidates.append((card.id, card.word))
         stats["new"] += 1
 
     if auto_enrich and accepted:
