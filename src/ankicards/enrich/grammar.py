@@ -15,12 +15,12 @@ import json
 from ..llm import call_json, load_prompt
 from ..models import POS, Card
 
-_INFLECTED_POS = {POS.NOUN, POS.VERB, POS.ADJECTIVE}
+INFLECTED_POS = {POS.NOUN, POS.VERB, POS.ADJECTIVE}
 
 
 async def enrich_grammar(card: Card) -> Card:
     """Добавить к карточке грамматические формы по части речи."""
-    if card.pos not in _INFLECTED_POS:
+    if card.pos not in INFLECTED_POS:
         return card
     result = await enrich_grammar_batch([card])
     return result[0]
@@ -28,7 +28,7 @@ async def enrich_grammar(card: Card) -> Card:
 
 async def enrich_grammar_batch(cards: list[Card]) -> list[Card]:
     """Батч-обработка для экономии токенов (один LLM-вызов на N карточек)."""
-    targets = [c for c in cards if c.pos in _INFLECTED_POS]
+    targets = [c for c in cards if c.pos in INFLECTED_POS]
     if not targets:
         return cards
 

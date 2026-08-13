@@ -94,6 +94,64 @@ async def test_exact_duplicate_is_merged_not_saved(tmp_path: Path, db: Database)
     assert db.get_by_status(Status.APPROVED) == []
 
 
+async def test_enrich_stage_failure_routes_card_to_review_not_approved(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Если batch-вызов enrichment падает, карточка не должна тихо стать APPROVED."""
+
+    async def _boom(cards: list[Card]) -> list[Card]:
+        raise RuntimeError("LLM недоступен")
+
+    monkeypatch.setattr(pipeline, "enrich_grammar_batch", _boom)
+
+    cfg = _make_config(tmp_path, grammar=True, examples=False, pronunciation=False)
+    card = _card("hus")
+    stats = await pipeline.run_ingest_pipeline(
+        [card], db=db, cfg=cfg, auto_enrich=True, auto_media=False
+    )
+
+    assert stats["errors"] == 1
+    assert stats["enrich_incomplete"] == 1
+    assert db.get_by_status(Status.APPROVED) == []
+    review_cards = db.get_by_status(Status.REVIEW)
+    assert len(review_cards) == 1
+    assert review_cards[0].word == "hus"
+
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT action, card_id FROM audit_log WHERE action = 'enrich_failed'"
+        ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["card_id"] == card.id
+
+
+async def test_enrich_partial_llm_response_routes_only_that_card_to_review(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Если LLM в успешном batch-ответе не вернул данные для одной карточки —
+    APPROVED получает только полностью обогащённая карточка, вторая уходит в REVIEW."""
+
+    async def _partial_grammar(cards: list[Card]) -> list[Card]:
+        # Отвечаем только за первую карточку, вторую LLM "забыл" вернуть.
+        cards[0].forms = {"gender": "m"}
+        return cards
+
+    monkeypatch.setattr(pipeline, "enrich_grammar_batch", _partial_grammar)
+
+    cfg = _make_config(tmp_path, grammar=True, examples=False, pronunciation=False)
+    ok_card = _card("hus")
+    missing_card = _card("bil")
+    stats = await pipeline.run_ingest_pipeline(
+        [ok_card, missing_card], db=db, cfg=cfg, auto_enrich=True, auto_media=False
+    )
+
+    assert stats["enrich_incomplete"] == 1
+    approved_words = {c.word for c in db.get_by_status(Status.APPROVED)}
+    review_words = {c.word for c in db.get_by_status(Status.REVIEW)}
+    assert approved_words == {"hus"}
+    assert review_words == {"bil"}
+
+
 async def test_enrich_flags_gate_which_stages_run(
     tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
