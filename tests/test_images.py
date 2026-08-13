@@ -24,6 +24,7 @@ from ankicards.config import (
     TTSConfig,
 )
 from ankicards.media import images as images_module
+from ankicards.models import POS, Card
 
 
 def _patch_get(monkeypatch: pytest.MonkeyPatch, response_json: dict[str, Any]) -> dict[str, Any]:
@@ -194,3 +195,149 @@ async def test_openverse_needs_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert results[0]["author"] == "Dana"
     assert captured["url"] == images_module.OPENVERSE_SEARCH_URL
+
+
+async def test_fallback_used_when_primary_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    async def empty(query: str, cfg: Config, count: int) -> list[dict[str, str]]:
+        calls.append("unsplash")
+        return []
+
+    async def hit(query: str, cfg: Config, count: int) -> list[dict[str, str]]:
+        calls.append("pexels")
+        return [{"url": "https://img/x.jpg"}]
+
+    monkeypatch.setitem(images_module._PROVIDERS, "unsplash", empty)
+    monkeypatch.setitem(images_module._PROVIDERS, "pexels", hit)
+    cfg = _make_config(provider="unsplash", fallback_providers=["pexels"])
+
+    results = await images_module.search_images("hus", cfg, count=1)
+
+    assert calls == ["unsplash", "pexels"]
+    assert results == [{"url": "https://img/x.jpg"}]
+
+
+async def test_fallback_used_when_primary_raises_http_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    async def forbidden(query: str, cfg: Config, count: int) -> list[dict[str, str]]:
+        calls.append("unsplash")
+        request = httpx.Request("GET", "https://api.unsplash.com/search/photos")
+        response = httpx.Response(403, request=request)
+        raise httpx.HTTPStatusError("403", request=request, response=response)
+
+    async def hit(query: str, cfg: Config, count: int) -> list[dict[str, str]]:
+        calls.append("pexels")
+        return [{"url": "https://img/y.jpg"}]
+
+    monkeypatch.setitem(images_module._PROVIDERS, "unsplash", forbidden)
+    monkeypatch.setitem(images_module._PROVIDERS, "pexels", hit)
+    cfg = _make_config(provider="unsplash", fallback_providers=["pexels"])
+
+    results = await images_module.search_images("hus", cfg, count=1)
+
+    assert calls == ["unsplash", "pexels"]
+    assert results[0]["url"] == "https://img/y.jpg"
+
+
+async def test_fallback_used_when_primary_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отсутствующий ключ у fallback-провайдера не роняет всю цепочку."""
+    calls: list[str] = []
+
+    async def missing_key(query: str, cfg: Config, count: int) -> list[dict[str, str]]:
+        calls.append("unsplash")
+        raise RuntimeError("UNSPLASH_ACCESS_KEY не задан в .env")
+
+    async def hit(query: str, cfg: Config, count: int) -> list[dict[str, str]]:
+        calls.append("openverse")
+        return [{"url": "https://img/z.jpg"}]
+
+    monkeypatch.setitem(images_module._PROVIDERS, "unsplash", missing_key)
+    monkeypatch.setitem(images_module._PROVIDERS, "openverse", hit)
+    cfg = _make_config(provider="unsplash", fallback_providers=["openverse"])
+
+    results = await images_module.search_images("hus", cfg, count=1)
+
+    assert calls == ["unsplash", "openverse"]
+    assert results[0]["url"] == "https://img/z.jpg"
+
+
+async def test_all_providers_fail_returns_empty_list_when_fallback_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def empty(query: str, cfg: Config, count: int) -> list[dict[str, str]]:
+        return []
+
+    monkeypatch.setitem(images_module._PROVIDERS, "unsplash", empty)
+    monkeypatch.setitem(images_module._PROVIDERS, "openverse", empty)
+    cfg = _make_config(provider="unsplash", fallback_providers=["openverse"])
+
+    results = await images_module.search_images("hus", cfg, count=1)
+
+    assert results == []
+
+
+async def test_last_provider_error_does_not_raise_when_fallback_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Даже ошибка последнего провайдера в цепочке не пробрасывается — карточка без картинки."""
+
+    async def broken(query: str, cfg: Config, count: int) -> list[dict[str, str]]:
+        raise RuntimeError("PEXELS_API_KEY не задан в .env")
+
+    monkeypatch.setitem(images_module._PROVIDERS, "pexels", broken)
+    cfg = _make_config(provider="unsplash", fallback_providers=["pexels"])
+
+    async def missing_key(query: str, cfg: Config, count: int) -> list[dict[str, str]]:
+        raise RuntimeError("UNSPLASH_ACCESS_KEY не задан в .env")
+
+    monkeypatch.setitem(images_module._PROVIDERS, "unsplash", missing_key)
+
+    results = await images_module.search_images("hus", cfg, count=1)
+
+    assert results == []
+
+
+async def test_unknown_fallback_provider_raises() -> None:
+    cfg = _make_config(provider="unsplash", fallback_providers=["flickr"])
+    with pytest.raises(ValueError, match="Неизвестный провайдер"):
+        await images_module.search_images("hus", cfg)
+
+
+async def _fake_search(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    """Подменяет search_images, чтобы поймать query без реального HTTP-вызова."""
+    captured: dict[str, str] = {}
+
+    async def fake(query: str, cfg: Config, count: int) -> list[dict[str, str]]:
+        captured["query"] = query
+        return []
+
+    monkeypatch.setattr(images_module, "search_images", fake)
+    return captured
+
+
+async def test_attach_image_uses_image_query_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = await _fake_search(monkeypatch)
+    cfg = _make_config()
+    card = Card(word="hus", pos=POS.NOUN, translation="дом", image_query="house")
+
+    await images_module.attach_image(card, cfg, auto_pick=True)
+
+    assert captured["query"] == "house"
+
+
+async def test_attach_image_falls_back_to_word_without_image_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = await _fake_search(monkeypatch)
+    cfg = _make_config()
+    card = Card(word="hus", pos=POS.NOUN, translation="дом")
+
+    await images_module.attach_image(card, cfg, auto_pick=True)
+
+    assert captured["query"] == "hus"

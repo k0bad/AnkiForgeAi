@@ -72,9 +72,10 @@ src/ankicards/
 scripts/
 ├── daily_topic.py     # Ежедневный автоцикл: generate → dedupe (AI-адъюдикация) → push → notify
 ├── daily_topic.sh     # Тонкая обёртка для cron: python scripts/daily_topic.py --notify
-├── init_db.py         # Создать SQLite схему (легаси — `ankiforgeai init` делает то же самое)
-├── setup_anki_notetype.py # Создать NorskCard/LanguageCard Note Type в Anki (легаси, см. выше)
 └── run_images.py      # Batch-скачивание картинок для всех существительных
+
+(БД и Anki Note Type создаёт `ankiforgeai init` — см. cli.py; отдельных
+скриптов init_db.py / setup_anki_notetype.py больше нет, они были легаси-дублями.)
 
 languages/{code}/
 ├── language.yaml      # Единственный источник истины для языка (см. секцию 4)
@@ -501,9 +502,9 @@ enrichment. **Важно:** `init` создаёт Note Type только оди�
 `notifications`, `images.provider`, ...) и в `.env` (`PEXELS_API_KEY`, `PIXABAY_API_KEY`, ...)
 всегда получают дефолты в Pydantic-моделях (`config.py`) — старый `config.yaml`/`.env` без этих
 полей продолжит работать как раньше, просто без новых фич, пока их не включат вручную. Схему БД
-(`db.py`) и Anki note type (`anki/notetype.py`) эти апдейты не трогали — `init_db.py` /
-`setup_anki_notetype.py` перезапускать не нужно, если только `DEVELOPER_GUIDE.md` явно не скажет
-обратное для конкретного изменения.
+(`db.py`) и Anki note type (`anki/notetype.py`) эти апдейты не трогали — повторно запускать
+`ankiforgeai init` не нужно, если только `DEVELOPER_GUIDE.md` явно не скажет обратное для
+конкретного изменения.
 
 **Разовое исключение:** история ветки `dev` была переписана и force-push'нута 2026-08-11 (из
 авторов коммитов удалён реальный email). Любой клон/чекаут `dev`, сделанный **до** этой даты, не

@@ -1,0 +1,167 @@
+"""Тесты для review.interactive: accept должен реально прогонять enrich/media,
+а не просто менять статус (issue #11)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from ankicards.config import (
+    AnkiConfig,
+    Config,
+    DedupeConfig,
+    EnrichConfig,
+    ImagesConfig,
+    IngestConfig,
+    LLMConfig,
+    LoggingConfig,
+    PathsConfig,
+    ReviewConfig,
+    TagsConfig,
+    TTSConfig,
+)
+from ankicards.db import Database
+from ankicards.models import POS, Card, Status
+from ankicards.review import interactive as review_module
+
+
+def _make_config(tmp_path: Path) -> Config:
+    return Config(
+        language="nb",
+        paths=PathsConfig(
+            db=tmp_path / "test.db",
+            logs_dir=tmp_path / "logs",
+            audio_dir=tmp_path / "audio",
+            images_dir=tmp_path / "images",
+            prompts_dir=tmp_path / "prompts",
+        ),
+        anki=AnkiConfig(),
+        dedupe=DedupeConfig(),
+        ingest=IngestConfig(),
+        llm=LLMConfig(),
+        tts=TTSConfig(),
+        images=ImagesConfig(enabled=False),
+        review=ReviewConfig(),
+        enrich=EnrichConfig(grammar=False, examples=False, pronunciation=False),
+        logging=LoggingConfig(),
+        tags=TagsConfig(),
+    )
+
+
+def _card(word: str) -> Card:
+    return Card(word=word, pos=POS.NOUN, translation="дом", status=Status.REVIEW)
+
+
+@pytest.fixture
+def db(tmp_path: Path) -> Database:
+    return Database(tmp_path / "cards.db")
+
+
+async def test_finalize_accepted_marks_approved_and_persists_enrichment(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _make_config(tmp_path)
+    card = _card("hus")
+    db.insert_card(card)
+
+    async def _fake_enrich(
+        cards: list[Card],
+        db_: Database,
+        cfg_: Config,
+        auto_enrich: bool = True,
+        auto_media: bool = True,
+    ) -> tuple[dict, set[str]]:
+        for c in cards:
+            c.example = "Jeg har et hus."
+        return {}, set()
+
+    monkeypatch.setattr(review_module, "enrich_and_generate_media", _fake_enrich)
+
+    await review_module._finalize_accepted([card], db, cfg)
+
+    assert card.status == Status.APPROVED
+    saved = db.get_by_id(card.id)
+    assert saved is not None
+    assert saved.status == Status.APPROVED
+    assert saved.example == "Jeg har et hus."
+
+
+async def test_finalize_accepted_returns_incomplete_cards_to_review(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _make_config(tmp_path)
+    card = _card("hus")
+    db.insert_card(card)
+
+    async def _fake_enrich(
+        cards: list[Card],
+        db_: Database,
+        cfg_: Config,
+        auto_enrich: bool = True,
+        auto_media: bool = True,
+    ) -> tuple[dict, set[str]]:
+        return {}, {card.id}
+
+    monkeypatch.setattr(review_module, "enrich_and_generate_media", _fake_enrich)
+
+    await review_module._finalize_accepted([card], db, cfg)
+
+    assert card.status == Status.REVIEW
+    saved = db.get_by_id(card.id)
+    assert saved is not None
+    assert saved.status == Status.REVIEW
+
+
+class _FakeQuestion:
+    def __init__(self, answer: str | None) -> None:
+        self._answer = answer
+
+    def ask(self) -> str | None:
+        return self._answer
+
+
+def test_review_pending_accept_then_quit_still_finalizes_accepted_card(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """accept на первой карточке, потом quit на второй — finally должен всё равно
+    прогнать enrichment для уже принятой, а не потерять её молча."""
+    cfg = _make_config(tmp_path)
+    accepted_card = _card("hus")
+    untouched_card = _card("bil")
+    db.insert_card(accepted_card)
+    db.insert_card(untouched_card)
+
+    answers = iter(
+        [
+            "accept   — одобрить (approved)",
+            "quit     — выйти из ревью",
+        ]
+    )
+    monkeypatch.setattr(
+        review_module.questionary, "select", lambda *a, **kw: _FakeQuestion(next(answers))
+    )
+
+    async def _fake_enrich(
+        cards: list[Card],
+        db_: Database,
+        cfg_: Config,
+        auto_enrich: bool = True,
+        auto_media: bool = True,
+    ) -> tuple[dict, set[str]]:
+        for c in cards:
+            c.example = "Jeg har et hus."
+        return {}, set()
+
+    monkeypatch.setattr(review_module, "enrich_and_generate_media", _fake_enrich)
+
+    review_module.review_pending(db, cfg)
+
+    saved_accepted = db.get_by_id(accepted_card.id)
+    assert saved_accepted is not None
+    assert saved_accepted.status == Status.APPROVED
+    assert saved_accepted.example == "Jeg har et hus."
+
+    saved_untouched = db.get_by_id(untouched_card.id)
+    assert saved_untouched is not None
+    assert saved_untouched.status == Status.REVIEW

@@ -68,7 +68,7 @@ Review can interrupt at any stage — user sees pending/review cards and accepts
 | `models.py` | `Card`, `NounForms`/`VerbForms`/`AdjectiveForms`, `Decision`, `Status` enum |
 | `config.py` | Loads `config.yaml` + `.env`; all config objects are Pydantic, cached |
 | `db.py` | `Database` class — SQLite with `connect()` context manager |
-| `pipeline.py` | Orchestrator `run_ingest_pipeline()` and `push_approved()` |
+| `pipeline.py` | Orchestrator `run_ingest_pipeline()` and `push_approved()`; shared `enrich_and_generate_media()` also used by `review/interactive.py` accept path |
 | `dedupe.py` | `check_card()` → fuzzy match via rapidfuzz; `judge_review()` → LLM adjudicates ambiguous matches; thresholds in `config.yaml` |
 | `anki/connect.py` | Async HTTP client for AnkiConnect API (port 8765) |
 | `anki/notetype.py` | NorskCard note type definition: 12 fields, HTML/CSS templates |
@@ -76,7 +76,7 @@ Review can interrupt at any stage — user sees pending/review cards and accepts
 | `enrich/grammar.py` | Calls Claude with `prompts/grammar_forms.md` → populates `card.forms` |
 | `media/tts.py` | edge-tts → `{card.id}_nb.mp3` in `media/audio/` |
 | `media/images.py` | Provider from `images.provider` (unsplash/pexels/pixabay/openverse) → `{card.id}.jpg` in `media/images/` (nouns only) |
-| `review/interactive.py` | rich + questionary terminal UI |
+| `review/interactive.py` | rich + questionary terminal UI; `accept` batches enrich/media via `pipeline.enrich_and_generate_media()` at session end |
 
 ## Principles
 
@@ -101,6 +101,7 @@ Key settings to know:
 - `dedupe.ai_adjudication: true` — for fuzzy matches, ask the LLM whether it's a real duplicate before falling back to human review (`dedupe.judge_review`, `prompts/dedupe_judge.md`); `dedupe.judge_model` optionally pins a cheaper/faster model for just that call (empty = `llm.model`, same provider)
 - `tts.voice_female` / `tts.voice_male` — come from the active language profile by default (`languages/{code}/language.yaml` → `tts:`); override in `config.yaml` to pin a different voice
 - `images.provider: unsplash | pexels | pixabay | openverse` — search backend for `media/images.py`; matching API key goes in `.env` (`UNSPLASH_ACCESS_KEY` / `PEXELS_API_KEY` / `PIXABAY_API_KEY`), `openverse` needs none
+- `images.fallback_providers: []` — opt-in list of providers to try in order if `images.provider` returns nothing (empty/no key/403/429/5xx); empty by default, so behavior is unchanged unless explicitly configured
 - `images.only_for_pos: [noun]` — images generated only for nouns
 - `enrich.grammar` / `enrich.examples` / `enrich.pronunciation` — toggle individual enrichment stages (set by `ankiforgeai setup`)
 

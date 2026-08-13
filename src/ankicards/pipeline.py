@@ -75,6 +75,113 @@ async def _run_enrich_stage(
             )
 
 
+async def enrich_and_generate_media(
+    cards: list[Card],
+    db: Database,
+    cfg: Config,
+    auto_enrich: bool = True,
+    auto_media: bool = True,
+) -> tuple[dict, set[str]]:
+    """Прогнать enrich- и media-стадии для карточек, уже прошедших dedupe.
+
+    Общий шаг для run_ingest_pipeline (accepted-кандидаты) и review_pending
+    (карточки, принятые вручную из review) — раньше accept просто менял статус,
+    ничего не enrich'я (issue #11). Возвращает (stats, incomplete_ids);
+    incomplete_ids — id карточек, где часть enrichment не удалась: вызывающий
+    код должен вернуть такие карточки в review, а не помечать approved.
+    """
+    stats: dict = {"enriched": 0, "enrich_incomplete": 0, "audio": 0, "errors": 0}
+    incomplete_ids: set[str] = set()
+
+    if auto_enrich and cards:
+        # Pronunciation и translation — базовые стадии (одна попытка в batch-блоке)
+        try:
+            if cfg.enrich.pronunciation:
+                logger.info("stage.start", stage="pronunciation", count=len(cards))
+                await enrich_pronunciation_batch(cards)
+                logger.info("stage.done", stage="pronunciation")
+            logger.info("stage.start", stage="translation", count=len(cards))
+            for card in cards:
+                if not card.translation:
+                    await enrich_translation(card)
+            logger.info("stage.done", stage="translation")
+        except Exception as e:
+            stats["errors"] += 1
+            _record(db, "warning", "enrich_failed", None, error=str(e), count=len(cards))
+
+        # Per-card translation retry (если не заполнилось)
+        for card in cards:
+            if card.translation:
+                continue
+            try:
+                await enrich_translation(card)
+            except Exception as e:
+                stats["errors"] += 1
+                db.log_action(
+                    "enrich_failed",
+                    card_id=card.id,
+                    details={"stage": "translation", "error": str(e)},
+                )
+                incomplete_ids.add(card.id)
+            else:
+                if not card.translation:
+                    incomplete_ids.add(card.id)
+                    db.log_action(
+                        "enrich_incomplete",
+                        card_id=card.id,
+                        details={"stage": "translation"},
+                    )
+
+        # Grammar и examples — обработаны через _run_enrich_stage с per-card ошибками
+        if cfg.enrich.grammar:
+            await _run_enrich_stage(
+                "grammar",
+                enrich_grammar_batch,
+                cards,
+                lambda c: c.pos not in INFLECTED_POS or bool(c.forms),
+                db,
+                stats,
+                incomplete_ids,
+            )
+
+        if cfg.enrich.examples:
+            await _run_enrich_stage(
+                "examples",
+                enrich_example_batch,
+                cards,
+                lambda c: bool(c.example),
+                db,
+                stats,
+                incomplete_ids,
+            )
+
+        stats["enriched"] = len(cards) - len(incomplete_ids)
+        stats["enrich_incomplete"] = len(incomplete_ids)
+
+    if auto_media and cards:
+        for card in cards:
+            try:
+                await generate_audio(card, cfg)
+                stats["audio"] += 1
+                _record(db, "info", "audio_generated", card.id)
+            except Exception as e:
+                stats["errors"] += 1
+                _record(db, "warning", "audio_failed", card.id, error=str(e))
+        # Картинки для существительных (если включено в конфиге)
+        if cfg.images.enabled:
+            for card in cards:
+                try:
+                    await attach_image(card, cfg, auto_pick=True)
+                    if card.image:
+                        stats.setdefault("images", 0)
+                        stats["images"] += 1
+                        _record(db, "info", "image_generated", card.id)
+                except Exception as e:
+                    _record(db, "warning", "image_failed", card.id, error=str(e))
+
+    return stats, incomplete_ids
+
+
 async def run_ingest_pipeline(
     cards: list[Card],
     db: Database,
@@ -131,93 +238,10 @@ async def run_ingest_pipeline(
         accepted_candidates.append((card.id, card.word))
         stats["new"] += 1
 
-    incomplete_ids: set[str] = set()
-
-    if auto_enrich and accepted:
-        # Pronunciation и translation — базовые стадии (одна попытка в batch-блоке)
-        try:
-            if cfg.enrich.pronunciation:
-                logger.info("stage.start", stage="pronunciation", count=len(accepted))
-                await enrich_pronunciation_batch(accepted)
-                logger.info("stage.done", stage="pronunciation")
-            logger.info("stage.start", stage="translation", count=len(accepted))
-            for card in accepted:
-                if not card.translation:
-                    await enrich_translation(card)
-            logger.info("stage.done", stage="translation")
-        except Exception as e:
-            stats["errors"] += 1
-            _record(db, "warning", "enrich_failed", None, error=str(e), count=len(accepted))
-
-        # Per-card translation retry (если не заполнилось)
-        for card in accepted:
-            if card.translation:
-                continue
-            try:
-                await enrich_translation(card)
-            except Exception as e:
-                stats["errors"] += 1
-                db.log_action(
-                    "enrich_failed",
-                    card_id=card.id,
-                    details={"stage": "translation", "error": str(e)},
-                )
-                incomplete_ids.add(card.id)
-            else:
-                if not card.translation:
-                    incomplete_ids.add(card.id)
-                    db.log_action(
-                        "enrich_incomplete",
-                        card_id=card.id,
-                        details={"stage": "translation"},
-                    )
-
-        # Grammar и examples — обработаны через _run_enrich_stage с per-card ошибками
-        if cfg.enrich.grammar:
-            await _run_enrich_stage(
-                "grammar",
-                enrich_grammar_batch,
-                accepted,
-                lambda c: c.pos not in INFLECTED_POS or bool(c.forms),
-                db,
-                stats,
-                incomplete_ids,
-            )
-
-        if cfg.enrich.examples:
-            await _run_enrich_stage(
-                "examples",
-                enrich_example_batch,
-                accepted,
-                lambda c: bool(c.example),
-                db,
-                stats,
-                incomplete_ids,
-            )
-
-        stats["enriched"] = len(accepted) - len(incomplete_ids)
-        stats["enrich_incomplete"] = len(incomplete_ids)
-
-    if auto_media and accepted:
-        for card in accepted:
-            try:
-                await generate_audio(card, cfg)
-                stats["audio"] += 1
-                _record(db, "info", "audio_generated", card.id)
-            except Exception as e:
-                stats["errors"] += 1
-                _record(db, "warning", "audio_failed", card.id, error=str(e))
-        # Картинки для существительных (если включено в конфиге)
-        if cfg.images.enabled:
-            for card in accepted:
-                try:
-                    await attach_image(card, cfg, auto_pick=True)
-                    if card.image:
-                        stats.setdefault("images", 0)
-                        stats["images"] += 1
-                        _record(db, "info", "image_generated", card.id)
-                except Exception as e:
-                    _record(db, "warning", "image_failed", card.id, error=str(e))
+    enrich_stats, incomplete_ids = await enrich_and_generate_media(
+        accepted, db, cfg, auto_enrich, auto_media
+    )
+    stats.update(enrich_stats)
 
     for card in accepted:
         card.status = Status.REVIEW if card.id in incomplete_ids else Status.APPROVED
