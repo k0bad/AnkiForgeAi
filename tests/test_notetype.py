@@ -1,4 +1,5 @@
-"""Тесты для anki/notetype.py: экранирование HTML и резолвинг языка/UI-лейблов."""
+"""Тесты для anki/notetype.py: экранирование HTML, резолвинг языка/UI-лейблов
+и декларативная схема полей (anki.fields в language.yaml)."""
 
 from __future__ import annotations
 
@@ -9,13 +10,16 @@ import pytest
 from ankicards.anki import notetype
 from ankicards.config import (
     AnkiConfig,
+    AnkiProfileConfig,
     Config,
     DedupeConfig,
     EnrichConfig,
     ImagesConfig,
     IngestConfig,
+    LanguageConfig,
     LLMConfig,
     LoggingConfig,
+    NoteFieldDef,
     PathsConfig,
     ReviewConfig,
     TagsConfig,
@@ -116,3 +120,112 @@ def test_pos_label_differs_per_language(patch_language) -> None:
 
     patch_language(language="de")
     assert notetype.pos_label("noun") == "Substantiv / Nomen"
+
+
+# ───────────── Декларативная схема полей (anki.fields) ─────────────
+
+
+@pytest.fixture
+def patch_custom_fields(tmp_path, monkeypatch):
+    """Подменяет и get_config(), и get_language() — язык с кастомным anki.fields,
+    без обращения к настоящим languages/{code}/language.yaml."""
+
+    def _patch(fields: list[NoteFieldDef], code: str = "xx") -> None:
+        cfg = _make_config(tmp_path, language=code)
+        monkeypatch.setattr(notetype, "get_config", lambda: cfg)
+
+        lang = LanguageConfig(
+            code=code,
+            name="Test Language",
+            pos_labels={"noun": "noun"},
+            anki=AnkiProfileConfig(deck_name="Test", note_type="LanguageCard", fields=fields),
+            back_labels={"translation": "Перевод"},
+        )
+        monkeypatch.setattr(notetype, "get_language", lambda _code=None: lang)
+
+    return _patch
+
+
+def test_default_fields_used_when_language_has_no_override(patch_language) -> None:
+    """Порядок соответствует визуальному рендеру бэка (Translation/POS/Pronunciation/
+    Forms/Example/ExampleTranslation), а не старой захардкоженной константе FIELDS —
+    см. комментарий над DEFAULT_FIELDS в anki/notetype.py."""
+    patch_language(language="nb")
+    assert notetype.field_names() == [
+        "Word", "Translation", "POS", "Pronunciation", "Forms", "Example",
+        "ExampleTranslation", "Image", "Audio", "Level", "Topic", "ID",
+    ]
+
+
+def test_custom_field_subset_reflected_in_field_names_and_card_fields(
+    patch_custom_fields,
+) -> None:
+    patch_custom_fields(
+        [
+            NoteFieldDef(name="Front", source="word", slot="front_title"),
+            NoteFieldDef(name="Back", source="translation", slot="section"),
+        ]
+    )
+    assert notetype.field_names() == ["Front", "Back"]
+
+    card = Card(word="hus", pos=POS.NOUN, translation="дом")
+    fields = notetype.card_to_anki_fields(card)
+    assert fields == {"Front": "hus", "Back": "дом"}
+
+
+def test_unknown_source_raises_note_type_config_error(patch_custom_fields) -> None:
+    patch_custom_fields([NoteFieldDef(name="Synonyms", source="synonyms", slot="section")])
+
+    card = Card(word="hus", pos=POS.NOUN, translation="дом")
+    with pytest.raises(notetype.NoteTypeConfigError, match="synonyms"):
+        notetype.card_to_anki_fields(card)
+
+    with pytest.raises(notetype.NoteTypeConfigError, match="synonyms"):
+        notetype.field_names()
+
+
+def test_duplicate_front_title_slot_raises(patch_custom_fields) -> None:
+    patch_custom_fields(
+        [
+            NoteFieldDef(name="Word", source="word", slot="front_title"),
+            NoteFieldDef(name="Word2", source="word", slot="front_title"),
+        ]
+    )
+    with pytest.raises(notetype.NoteTypeConfigError, match="front_title"):
+        notetype.field_names()
+
+
+def test_duplicate_field_names_raise(patch_custom_fields) -> None:
+    patch_custom_fields(
+        [
+            NoteFieldDef(name="Word", source="word", slot="front_title"),
+            NoteFieldDef(name="Word", source="translation", slot="section"),
+        ]
+    )
+    with pytest.raises(notetype.NoteTypeConfigError, match="Duplicate field names"):
+        notetype.field_names()
+
+
+def test_custom_tag_and_section_slots_land_in_expected_places(patch_custom_fields) -> None:
+    patch_custom_fields(
+        [
+            NoteFieldDef(name="Word", source="word", slot="front_title"),
+            NoteFieldDef(
+                name="Translation", source="translation", slot="section", label_key="translation"
+            ),
+            NoteFieldDef(name="Difficulty", source="level", slot="tag"),
+        ]
+    )
+    template = notetype._build_back_template()
+    assert '<div class="section">' in template
+    assert "{{Translation}}" in template
+    assert '{{#Difficulty}}<span class="tag">{{Difficulty}}</span>{{/Difficulty}}' in template
+    # front-only и hidden поля не должны просачиваться на бэк
+    assert "{{Word}}" not in template
+
+
+def test_front_template_uses_custom_css_class(patch_custom_fields) -> None:
+    patch_custom_fields(
+        [NoteFieldDef(name="Word", source="word", slot="front_title", css_class="headword")]
+    )
+    assert '<div class="headword">{{Word}}</div>' in notetype.front_template()

@@ -9,18 +9,59 @@ Pipeline для одного потока кандидатов:
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+
 from .anki.connect import AnkiConnect, AnkiConnectError
 from .anki.notetype import card_to_anki_fields
 from .config import Config
 from .db import Database
 from .dedupe import check_card, judge_review
 from .enrich.examples import enrich_example_batch
-from .enrich.grammar import enrich_grammar_batch
+from .enrich.grammar import INFLECTED_POS, enrich_grammar_batch
 from .enrich.pronunciation import enrich_pronunciation_batch
 from .enrich.translation import enrich_translation
 from .media.images import attach_image
 from .media.tts import generate_audio
 from .models import Card, Status
+
+
+async def _run_enrich_stage(
+    stage: str,
+    fn: Callable[[list[Card]], Awaitable[list[Card]]],
+    cards: list[Card],
+    is_complete: Callable[[Card], bool],
+    db: Database,
+    stats: dict,
+    incomplete_ids: set[str],
+) -> None:
+    """Прогнать один batch-вызов enrichment; отследить провал и неполный результат.
+
+    Провал самого вызова (сеть/парсинг/LLM) бьёт по всем cards в batch — это одна
+    LLM-задача на всех. Но даже при успешном вызове LLM мог не вернуть данные для
+    части карточек (id отсутствует в ответе) — это тоже неполный enrichment,
+    просто без исключения, так что проверяем результат отдельно.
+    """
+    try:
+        await fn(cards)
+    except Exception as e:
+        stats["errors"] += 1
+        for card in cards:
+            db.log_action(
+                "enrich_failed",
+                card_id=card.id,
+                details={"stage": stage, "error": str(e)},
+            )
+        incomplete_ids.update(c.id for c in cards)
+        return
+
+    for card in cards:
+        if not is_complete(card):
+            incomplete_ids.add(card.id)
+            db.log_action(
+                "enrich_incomplete",
+                card_id=card.id,
+                details={"stage": stage},
+            )
 
 
 async def run_ingest_pipeline(
@@ -34,7 +75,15 @@ async def run_ingest_pipeline(
 
     Возвращает статистику: {new: N, review: M, merged: K, ...}
     """
-    stats = {"new": 0, "review": 0, "merged": 0, "enriched": 0, "audio": 0, "errors": 0}
+    stats = {
+        "new": 0,
+        "review": 0,
+        "merged": 0,
+        "enriched": 0,
+        "enrich_incomplete": 0,
+        "audio": 0,
+        "errors": 0,
+    }
 
     accepted: list[Card] = []
     accepted_candidates: list[tuple[str, str]] = []
@@ -70,26 +119,71 @@ async def run_ingest_pipeline(
         accepted_candidates.append((card.id, card.word))
         stats["new"] += 1
 
+    incomplete_ids: set[str] = set()
+
     if auto_enrich and accepted:
-        try:
-            # Сначала транскрипция, потом перевод, грамматика и примеры
-            if cfg.enrich.pronunciation:
-                await enrich_pronunciation_batch(accepted)
-            for card in accepted:
-                if not card.translation:
-                    await enrich_translation(card)
-            if cfg.enrich.grammar:
-                await enrich_grammar_batch(accepted)
-            if cfg.enrich.examples:
-                await enrich_example_batch(accepted)
-            stats["enriched"] = len(accepted)
-        except Exception as e:
-            stats["errors"] += 1
-            db.log_action(
-                "enrich_failed",
-                card_id=None,
-                details={"error": str(e), "count": len(accepted)},
+        # Сначала транскрипция, потом перевод, грамматика и примеры.
+        # Каждая стадия — свой try/except: одна упавшая стадия не должна
+        # маскировать успех/провал остальных, и каждая карточка, которую
+        # LLM не обогатил, должна быть видна в audit_log по своему card_id
+        # вместо того, чтобы молча уйти в APPROVED.
+        if cfg.enrich.pronunciation:
+            await _run_enrich_stage(
+                "pronunciation",
+                enrich_pronunciation_batch,
+                accepted,
+                lambda c: bool(c.pronunciation),
+                db,
+                stats,
+                incomplete_ids,
             )
+
+        for card in accepted:
+            if card.translation:
+                continue
+            try:
+                await enrich_translation(card)
+            except Exception as e:
+                stats["errors"] += 1
+                db.log_action(
+                    "enrich_failed",
+                    card_id=card.id,
+                    details={"stage": "translation", "error": str(e)},
+                )
+                incomplete_ids.add(card.id)
+            else:
+                if not card.translation:
+                    incomplete_ids.add(card.id)
+                    db.log_action(
+                        "enrich_incomplete",
+                        card_id=card.id,
+                        details={"stage": "translation"},
+                    )
+
+        if cfg.enrich.grammar:
+            await _run_enrich_stage(
+                "grammar",
+                enrich_grammar_batch,
+                accepted,
+                lambda c: c.pos not in INFLECTED_POS or bool(c.forms),
+                db,
+                stats,
+                incomplete_ids,
+            )
+
+        if cfg.enrich.examples:
+            await _run_enrich_stage(
+                "examples",
+                enrich_example_batch,
+                accepted,
+                lambda c: bool(c.example),
+                db,
+                stats,
+                incomplete_ids,
+            )
+
+        stats["enriched"] = len(accepted) - len(incomplete_ids)
+        stats["enrich_incomplete"] = len(incomplete_ids)
 
     if auto_media and accepted:
         for card in accepted:
@@ -119,7 +213,7 @@ async def run_ingest_pipeline(
                     )
 
     for card in accepted:
-        card.status = Status.APPROVED
+        card.status = Status.REVIEW if card.id in incomplete_ids else Status.APPROVED
         db.insert_card(card)
         db.log_action("create", card_id=card.id, details={"word": card.word})
 
