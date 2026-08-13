@@ -20,9 +20,20 @@ from .enrich.examples import enrich_example_batch
 from .enrich.grammar import INFLECTED_POS, enrich_grammar_batch
 from .enrich.pronunciation import enrich_pronunciation_batch
 from .enrich.translation import enrich_translation
+from .log import get_logger
 from .media.images import attach_image
 from .media.tts import generate_audio
 from .models import Card, Status
+
+logger = get_logger(__name__)
+
+
+def _record(db: Database, level: str, action: str, card_id: str | None, **details: object) -> None:
+    """Записать событие и в audit_log (SQLite, персистентный audit), и в structlog
+    (live-трасса текущего run_id — см. log.bound_run). Одна точка вместо двух
+    рассинхронизирующихся вызовов на каждое событие пайплайна."""
+    db.log_action(action, card_id=card_id, details=details)
+    getattr(logger, level)(action, card_id=card_id, **details)
 
 
 async def _run_enrich_stage(
@@ -91,30 +102,31 @@ async def run_ingest_pipeline(
         decision = check_card(card, db, cfg, batch_candidates=accepted_candidates)
         decision = await judge_review(card, decision, cfg)
         if decision.decision == "merge":
-            db.log_action(
+            _record(
+                db,
+                "info",
                 "skip_duplicate",
-                card_id=card.id,
-                details={
-                    "word": card.word,
-                    "matches": [m.model_dump() for m in decision.matches],
-                    "reason": decision.reason,
-                },
+                card.id,
+                word=card.word,
+                matches=[m.model_dump() for m in decision.matches],
+                reason=decision.reason,
             )
             stats["merged"] += 1
             continue
         if decision.decision == "review":
             card.status = Status.REVIEW
             db.insert_card(card)
-            db.log_action(
+            _record(
+                db,
+                "info",
                 "review_needed",
-                card_id=card.id,
-                details={
-                    "matches": [m.model_dump() for m in decision.matches],
-                    "reason": decision.reason,
-                },
+                card.id,
+                matches=[m.model_dump() for m in decision.matches],
+                reason=decision.reason,
             )
             stats["review"] += 1
             continue
+        logger.debug("dedupe.accepted", card_id=card.id, word=card.word)
         accepted.append(card)
         accepted_candidates.append((card.id, card.word))
         stats["new"] += 1
@@ -122,21 +134,29 @@ async def run_ingest_pipeline(
     incomplete_ids: set[str] = set()
 
     if auto_enrich and accepted:
-        # Сначала транскрипция, потом перевод, грамматика и примеры.
-        # Каждая стадия — свой try/except: одна упавшая стадия не должна
-        # маскировать успех/провал остальных, и каждая карточка, которую
-        # LLM не обогатил, должна быть видна в audit_log по своему card_id
-        # вместо того, чтобы молча уйти в APPROVED.
-        if cfg.enrich.pronunciation:
-            await _run_enrich_stage(
-                "pronunciation",
-                enrich_pronunciation_batch,
-                accepted,
-                lambda c: bool(c.pronunciation),
-                db,
-                stats,
-                incomplete_ids,
-            )
+        try:
+            # Сначала транскрипция, потом перевод, грамматика и примеры
+            if cfg.enrich.pronunciation:
+                logger.info("stage.start", stage="pronunciation", count=len(accepted))
+                await enrich_pronunciation_batch(accepted)
+                logger.info("stage.done", stage="pronunciation")
+            logger.info("stage.start", stage="translation", count=len(accepted))
+            for card in accepted:
+                if not card.translation:
+                    await enrich_translation(card)
+            logger.info("stage.done", stage="translation")
+            if cfg.enrich.grammar:
+                logger.info("stage.start", stage="grammar", count=len(accepted))
+                await enrich_grammar_batch(accepted)
+                logger.info("stage.done", stage="grammar")
+            if cfg.enrich.examples:
+                logger.info("stage.start", stage="examples", count=len(accepted))
+                await enrich_example_batch(accepted)
+                logger.info("stage.done", stage="examples")
+            stats["enriched"] = len(accepted)
+        except Exception as e:
+            stats["errors"] += 1
+            _record(db, "warning", "enrich_failed", None, error=str(e), count=len(accepted))
 
         for card in accepted:
             if card.translation:
@@ -190,13 +210,10 @@ async def run_ingest_pipeline(
             try:
                 await generate_audio(card, cfg)
                 stats["audio"] += 1
+                _record(db, "info", "audio_generated", card.id)
             except Exception as e:
                 stats["errors"] += 1
-                db.log_action(
-                    "audio_failed",
-                    card_id=card.id,
-                    details={"error": str(e)},
-                )
+                _record(db, "warning", "audio_failed", card.id, error=str(e))
         # Картинки для существительных (если включено в конфиге)
         if cfg.images.enabled:
             for card in accepted:
@@ -205,17 +222,14 @@ async def run_ingest_pipeline(
                     if card.image:
                         stats.setdefault("images", 0)
                         stats["images"] += 1
+                        _record(db, "info", "image_generated", card.id)
                 except Exception as e:
-                    db.log_action(
-                        "image_failed",
-                        card_id=card.id,
-                        details={"error": str(e)},
-                    )
+                    _record(db, "warning", "image_failed", card.id, error=str(e))
 
     for card in accepted:
         card.status = Status.REVIEW if card.id in incomplete_ids else Status.APPROVED
         db.insert_card(card)
-        db.log_action("create", card_id=card.id, details={"word": card.word})
+        _record(db, "info", "create", card.id, word=card.word)
 
     return stats
 
@@ -226,6 +240,7 @@ async def push_approved(db: Database, anki: AnkiConnect, cfg: Config) -> int:
     if not approved:
         return 0
 
+    logger.info("stage.start", stage="push", count=len(approved))
     await anki.ensure_deck()
     pushed = 0
     for card in approved:
@@ -250,8 +265,8 @@ async def push_approved(db: Database, anki: AnkiConnect, cfg: Config) -> int:
                     "UPDATE cards SET status = ?, anki_note_id = ? WHERE id = ?",
                     (Status.PUSHED.value, note_id, card.id),
                 )
-            db.log_action("push", card_id=card.id, details={"note_id": note_id})
+            _record(db, "info", "push", card.id, note_id=note_id)
             pushed += 1
         except AnkiConnectError as e:
-            db.log_action("push_failed", card_id=card.id, details={"error": str(e)})
+            _record(db, "warning", "push_failed", card.id, error=str(e))
     return pushed
