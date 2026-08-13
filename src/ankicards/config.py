@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from functools import cache, lru_cache
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from dotenv import load_dotenv
@@ -135,6 +136,33 @@ class TagsConfig(BaseModel):
     source_prefix: str = "source"
 
 
+NoteFieldSlot = Literal["front_title", "front_audio", "front_image", "section", "tag", "hidden"]
+
+
+class NoteFieldDef(BaseModel):
+    """Одно поле Anki Note Type: источник данных (FIELD_RESOLVERS в anki/notetype.py)
+    и место в шаблоне карточки (slot)."""
+
+    name: str
+    source: str
+    slot: NoteFieldSlot = "section"
+    optional: bool = False  # section: обернуть в {{#Field}}...{{/Field}} на бэке
+    label_key: str | None = None  # ключ в back_labels/EN_BACK_LABELS; по умолчанию name.lower()
+    css_class: str | None = None  # по умолчанию name.lower()
+
+
+class AnkiProfileConfig(BaseModel):
+    """anki: секция в language.yaml — колода, Note Type и (опционально) схема полей.
+
+    fields=None означает "использовать DEFAULT_FIELDS" (anki/notetype.py) —
+    сегодняшний фиксированный набор из 12 полей.
+    """
+
+    deck_name: str = ""
+    note_type: str = "LanguageCard"
+    fields: list[NoteFieldDef] | None = None
+
+
 class LanguageConfig(BaseModel):
     """Языковой профиль — загружается из languages/{code}/language.yaml."""
 
@@ -144,7 +172,7 @@ class LanguageConfig(BaseModel):
     pos_labels: dict[str, str] = Field(default_factory=dict)
     forms: dict[str, list[dict]] = Field(default_factory=dict)
     tts: dict[str, str] = Field(default_factory=dict)
-    anki: dict[str, str] = Field(default_factory=dict)
+    anki: AnkiProfileConfig = Field(default_factory=AnkiProfileConfig)
     back_labels: dict[str, str] = Field(default_factory=dict)
 
     @property
