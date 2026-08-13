@@ -21,7 +21,7 @@ See [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for the full architecture reference
 1. Create `languages/{code}/language.yaml` (see [nb](languages/nb/language.yaml) or [de](languages/de/language.yaml) as templates)
 2. Copy prompts: `cp prompts/*.md languages/{code}/prompts/`
 3. Adapt prompts for the target language
-4. Run `pytest tests/test_language.py -v` to verify
+4. Run `pytest tests/test_language.py -v` to verify1
 
 ## Code Quality
 
