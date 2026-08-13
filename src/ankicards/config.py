@@ -93,6 +93,9 @@ class TTSConfig(BaseModel):
 class ImagesConfig(BaseModel):
     enabled: bool = True
     provider: str = "unsplash"  # "unsplash" | "pexels" | "pixabay" | "openverse"
+    # Опционально: если provider не дал результата (пусто/403/429/5xx/нет ключа),
+    # пробовать эти провайдеры по очереди. Пусто по умолчанию = поведение не меняется.
+    fallback_providers: list[str] = Field(default_factory=list)
     per_page: int = 5
     only_for_pos: list[str] = Field(default_factory=lambda: ["noun"])
     max_size_kb: int = 500
