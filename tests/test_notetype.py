@@ -152,8 +152,18 @@ def test_default_fields_used_when_language_has_no_override(patch_language) -> No
     см. комментарий над DEFAULT_FIELDS в anki/notetype.py."""
     patch_language(language="nb")
     assert notetype.field_names() == [
-        "Word", "Translation", "POS", "Pronunciation", "Forms", "Example",
-        "ExampleTranslation", "Image", "Audio", "Level", "Topic", "ID",
+        "Word",
+        "Translation",
+        "POS",
+        "Pronunciation",
+        "Forms",
+        "Example",
+        "ExampleTranslation",
+        "Image",
+        "Audio",
+        "Level",
+        "Topic",
+        "ID",
     ]
 
 
@@ -229,3 +239,129 @@ def test_front_template_uses_custom_css_class(patch_custom_fields) -> None:
         [NoteFieldDef(name="Word", source="word", slot="front_title", css_class="headword")]
     )
     assert '<div class="headword">{{Word}}</div>' in notetype.front_template()
+
+
+# ───────────── title_meta / recap_on_back / nest_in_previous (issue #17) ─────────────
+
+
+def test_title_meta_renders_inline_next_to_front_title(patch_custom_fields) -> None:
+    patch_custom_fields(
+        [
+            NoteFieldDef(name="Word", source="word", slot="front_title", css_class="word"),
+            NoteFieldDef(name="POS", source="pos_label", slot="title_meta", css_class="pos"),
+        ]
+    )
+    assert (
+        '<div class="word">{{Word}} <span class="pos">{{POS}}</span></div>'
+        in notetype.front_template()
+    )
+
+
+def test_optional_title_meta_is_guarded(patch_custom_fields) -> None:
+    patch_custom_fields(
+        [
+            NoteFieldDef(name="Word", source="word", slot="front_title"),
+            NoteFieldDef(
+                name="POS", source="pos_label", slot="title_meta", optional=True, css_class="pos"
+            ),
+        ]
+    )
+    template = notetype.front_template()
+    assert '{{#POS}}<span class="pos">{{POS}}</span>{{/POS}}' in template
+
+
+def test_duplicate_title_meta_slot_raises(patch_custom_fields) -> None:
+    patch_custom_fields(
+        [
+            NoteFieldDef(name="Word", source="word", slot="front_title"),
+            NoteFieldDef(name="POS", source="pos_label", slot="title_meta"),
+            NoteFieldDef(name="POS2", source="pos_label", slot="title_meta"),
+        ]
+    )
+    with pytest.raises(notetype.NoteTypeConfigError, match="title_meta"):
+        notetype.field_names()
+
+
+def test_recap_on_back_echoes_front_title_in_back_header(patch_custom_fields) -> None:
+    patch_custom_fields(
+        [
+            NoteFieldDef(
+                name="Word",
+                source="word",
+                slot="front_title",
+                css_class="word",
+                recap_on_back=True,
+            ),
+            NoteFieldDef(
+                name="Translation",
+                source="translation",
+                slot="section",
+                label_key="translation",
+            ),
+        ]
+    )
+    template = notetype._build_back_template()
+    assert '<div class="back-recap"><span class="word">{{Word}}</span></div>' in template
+    # recap идёт до <hr id=answer>, не после
+    assert template.index("back-recap") < template.index("hr id=answer")
+
+
+def test_no_recap_when_no_field_opts_in(patch_custom_fields) -> None:
+    """Не ломает языки/тесты, где ни одно поле не просит recap_on_back (дефолт False)."""
+    patch_custom_fields(
+        [
+            NoteFieldDef(name="Word", source="word", slot="front_title"),
+            NoteFieldDef(name="Translation", source="translation", slot="section"),
+        ]
+    )
+    template = notetype._build_back_template()
+    assert "back-recap" not in template
+    assert "{{Word}}" not in template
+
+
+def test_nest_in_previous_wraps_inside_preceding_section(patch_custom_fields) -> None:
+    patch_custom_fields(
+        [
+            NoteFieldDef(name="Word", source="word", slot="front_title"),
+            NoteFieldDef(
+                name="Example",
+                source="example",
+                slot="section",
+                optional=True,
+                label_key="example",
+                css_class="example",
+            ),
+            NoteFieldDef(
+                name="ExampleTranslation",
+                source="example_translation",
+                slot="section",
+                optional=True,
+                css_class="example-translation",
+                nest_in_previous=True,
+            ),
+        ]
+    )
+    template = notetype._build_back_template()
+    assert (
+        '<div class="example">{{Example}}'
+        '{{#ExampleTranslation}}<span class="example-translation">{{ExampleTranslation}}'
+        "</span>{{/ExampleTranslation}}</div>" in template
+    )
+    # не рендерится как отдельная .section-обёртка
+    assert template.count('<div class="section">') == 1
+
+
+def test_default_fields_place_pos_next_to_word_and_pair_example(patch_language) -> None:
+    """Реальная DEFAULT_FIELDS-схема (issue #17): POS не отдельная секция, ExampleTranslation
+    не отдельная секция — обе вложены/слиты с соседним полем."""
+    patch_language(language="nb")
+    front = notetype.front_template()
+    back = notetype._build_back_template()
+
+    assert '<span class="pos">{{POS}}</span>' in front
+    assert '<div class="back-recap">' in back
+    assert back.index("back-recap") < back.index("hr id=answer")
+    # POS и ExampleTranslation больше не отдельные секции — остаются
+    # Translation/Pronunciation/Forms/Example
+    assert back.count('<div class="section">') == 4
+    assert '<span class="example-translation">{{ExampleTranslation}}</span>' in back

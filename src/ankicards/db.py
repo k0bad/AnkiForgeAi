@@ -147,6 +147,31 @@ class Database:
                 (status.value, card_id),
             )
 
+    def update_card(self, card: Card) -> None:
+        """Перезаписать поля, которые может изменить enrichment/media (+ status).
+
+        Для карточек, уже существующих в БД (обычно review → accept, см. issue #11) —
+        insert_card() тут не годится, он INSERT, а не UPDATE.
+        """
+        with self.connect() as conn:
+            conn.execute(
+                """UPDATE cards SET
+                    pronunciation = ?, translation = ?, example = ?, example_translation = ?,
+                    forms = ?, image = ?, audio = ?, status = ?
+                   WHERE id = ?""",
+                (
+                    card.pronunciation,
+                    card.translation,
+                    card.example,
+                    card.example_translation,
+                    json.dumps(card.forms) if card.forms else None,
+                    card.image,
+                    card.audio,
+                    card.status.value,
+                    card.id,
+                ),
+            )
+
     def get_by_status(self, status: Status) -> list[Card]:
         """Все карточки с заданным статусом."""
         with self.connect() as conn:

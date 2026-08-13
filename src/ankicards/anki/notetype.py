@@ -8,6 +8,7 @@
     language.yaml -> anki.fields: [...] переопределяет DEFAULT_FIELDS ниже.
     Каждое поле ссылается на источник данных через FIELD_RESOLVERS.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -34,21 +35,18 @@ NOTE_TYPE_NAME_PROP = property(lambda self: _get_note_type_name())  # псевд
 
 
 # ───────────── Схема полей по умолчанию ─────────────
-# Буквальное описание сегодняшних 12 полей — вывод field_names()/front_template()/
-# _build_back_template() для языка без своего anki.fields побайтово идентичен
-# захардкоженной версии, которая была до этого рефакторинга.
+# Дефолтная схема для языка без своего anki.fields (см. issue #17 — "Reference Card":
+# POS вынесен в title_meta (стоит рядом со словом на фронте и в шапке бэка вместо
+# отдельной секции), ExampleTranslation вложен в Example через nest_in_previous
+# (единый блок "пример + перевод" вместо двух секций).
 
 
 # ВАЖНО: порядок списка — это и inOrderFields (field_names()), и порядок секций
 # на бэке (_build_back_template() рендерит section-поля в порядке этого списка).
-# Оригинальный _build_back_template() (до рефакторинга) был захардкожен в порядке
-# Translation -> POS -> Pronunciation -> Forms -> Example -> ExampleTranslation —
-# НЕ в порядке старой константы FIELDS (Word, Pronunciation, Translation, ...).
-# Здесь порядок выбран под визуальный вывод карточки (CSS/шаблоны — то, что
-# реально видит пользователь), а не под старый порядок FIELDS, который менял
-# только порядок полей в редакторе заметок Anki (косметика, не влияет на рендер).
 DEFAULT_FIELDS: list[NoteFieldDef] = [
-    NoteFieldDef(name="Word", source="word", slot="front_title", css_class="word"),
+    NoteFieldDef(
+        name="Word", source="word", slot="front_title", css_class="word", recap_on_back=True
+    ),
     NoteFieldDef(
         name="Translation",
         source="translation",
@@ -59,9 +57,9 @@ DEFAULT_FIELDS: list[NoteFieldDef] = [
     NoteFieldDef(
         name="POS",
         source="pos_label",
-        slot="section",
-        label_key="part_of_speech",
+        slot="title_meta",
         css_class="pos",
+        recap_on_back=True,
     ),
     NoteFieldDef(
         name="Pronunciation",
@@ -92,8 +90,8 @@ DEFAULT_FIELDS: list[NoteFieldDef] = [
         source="example_translation",
         slot="section",
         optional=True,
-        label_key="example_translation",
         css_class="example-translation",
+        nest_in_previous=True,
     ),
     NoteFieldDef(name="Image", source="image_html", slot="front_image", css_class="card-image"),
     NoteFieldDef(name="Audio", source="audio_html", slot="front_audio", css_class="audio"),
@@ -103,34 +101,119 @@ DEFAULT_FIELDS: list[NoteFieldDef] = [
 ]
 
 CSS = """.card {
+    --bg: #F2F1EC;
+    --surface: #FBFAF6;
+    --ink: #22283A;
+    --ink-soft: #5B6373;
+    --stamp: #8C2F2F;
+    --rule: #C9C3B4;
+
     font-family: -apple-system, "Segoe UI", "Noto Sans", sans-serif;
     font-size: 20px;
     text-align: left;
-    color: #1a1a1a;
-    background: #fafafa;
+    color: var(--ink);
+    background: var(--bg);
     padding: 24px 32px;
     max-width: 600px;
     margin: 0 auto;
-    line-height: 1.6;
+    line-height: 1.55;
 }
-.word { font-size: 36px; font-weight: 700; text-align: center; margin: 40px 0 8px; }
-.pronunciation { text-align: center; color: #888; font-size: 18px; font-style: italic; }
-.section { margin-bottom: 20px; }
-.label { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #999; margin-bottom: 4px; }  # noqa: E501
-.translation { font-size: 26px; font-weight: 600; color: #2c5282; }
-.pos { font-size: 16px; color: #555; background: #e8e8e8; display: inline-block; padding: 2px 10px; border-radius: 4px; }  # noqa: E501
-.forms { margin: 8px 0; }
+/* Anki (desktop/AnkiDroid/AnkiMobile) adds .night_mode to an ancestor of .card */
+.night_mode .card {
+    --bg: #242220;
+    --surface: #2C2926;
+    --ink: #EDE6D8;
+    --ink-soft: #B9AF9C;
+    --stamp: #C1544F;
+    --rule: #443F38;
+}
+@media (max-width: 420px) {
+    .card { padding: 16px 20px; font-size: 18px; }
+}
+
+.word {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+    font-size: 36px;
+    text-align: center;
+    margin: 8px 0 4px;
+}
+.pos {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+    font-style: italic;
+    font-size: 15px;
+    color: var(--ink-soft);
+    margin-left: 6px;
+}
+.pronunciation-ru {
+    display: block;
+    text-align: center;
+    font-family: "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+    font-size: 14px;
+    color: var(--ink-soft);
+    margin-top: 2px;
+}
+
+.card-image {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 6px;
+    margin: 6px 0 16px;
+}
+.card-image img { display: block; width: 100%; height: auto; }
+.audio { text-align: center; margin: 6px 0; }
+
+.back-recap { text-align: center; padding-bottom: 12px; }
+.back-recap .word { font-size: 26px; margin: 0; }
+hr#answer { border: none; border-top: 2px solid var(--ink); margin: 0 0 18px; }
+
+.section {
+    display: grid;
+    grid-template-columns: 90px 1fr;
+    column-gap: 14px;
+    row-gap: 4px;
+    align-items: baseline;
+    margin-bottom: 14px;
+}
+@media (max-width: 420px) { .section { grid-template-columns: 70px 1fr; } }
+@media (max-width: 320px) { .section { grid-template-columns: 1fr; row-gap: 2px; } }
+.label {
+    font-family: "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-soft);
+}
+.translation { font-size: 22px; font-weight: 600; }
 .forms table { border-collapse: collapse; width: 100%; }
-.forms td { padding: 6px 12px; border-bottom: 1px solid #e2e8f0; font-size: 17px; }
-.forms td:first-child { color: #888; font-size: 13px; width: 120px; vertical-align: top; padding-top: 8px; }  # noqa: E501
-.forms tr:last-child td { border-bottom: none; }
-.example { font-style: italic; color: #2d3748; font-size: 18px; }
-.example-translation { color: #718096; font-size: 17px; }
-.audio { text-align: center; margin: 8px 0; }
-.card-image { text-align: center; margin: 12px 0; }
-.card-image img { max-width: 280px; border-radius: 8px; }
-.tags { margin-top: 20px; font-size: 12px; color: #a0aec0; }
-.tag { display: inline-block; background: #edf2f7; padding: 1px 8px; border-radius: 3px; margin-right: 4px; }"""  # noqa: E501
+.forms td { padding: 3px 10px 3px 0; font-size: 16px; }
+.forms td:first-child { color: var(--ink-soft); white-space: nowrap; }
+.example {
+    font-style: italic;
+    font-size: 17px;
+    background: var(--surface);
+    border-left: 3px solid var(--stamp);
+    padding: 8px 12px;
+}
+.example-translation {
+    display: block;
+    font-style: normal;
+    color: var(--ink-soft);
+    font-size: 14px;
+    margin-top: 4px;
+}
+
+.tags {
+    margin-top: 18px;
+    padding-top: 10px;
+    border-top: 1px solid var(--rule);
+    display: flex;
+    gap: 12px;
+    font-family: "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+    font-size: 11px;
+    color: var(--ink-soft);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}"""
 
 
 # ───────────── Резолвинг активной схемы полей ─────────────
@@ -152,7 +235,7 @@ def _validate_fields(fields: list[NoteFieldDef]) -> None:
             f"Duplicate field names in anki.fields for language {lang_code!r}: {names}"
         )
 
-    unique_slots = ("front_title", "front_audio", "front_image")
+    unique_slots = ("front_title", "front_audio", "front_image", "title_meta")
     seen: dict[str, str] = {}
     for field in fields:
         if field.source not in FIELD_RESOLVERS:
@@ -181,8 +264,9 @@ def field_names() -> list[str]:
 
 
 def front_template() -> str:
-    """HTML фронта карточки: front_title (всегда), затем front_audio/front_image (guarded)."""
-    front_slots = ("front_title", "front_audio", "front_image")
+    """HTML фронта карточки: front_title (всегда, + title_meta инлайном рядом, если есть),
+    затем front_audio/front_image (guarded)."""
+    front_slots = ("front_title", "front_audio", "front_image", "title_meta")
     by_slot: dict[str, NoteFieldDef] = {
         f.slot: f for f in _active_fields() if f.slot in front_slots
     }
@@ -191,7 +275,15 @@ def front_template() -> str:
     title = by_slot.get("front_title")
     if title is not None:
         css_class = title.css_class or title.name.lower()
-        parts.append(f'<div class="{css_class}">{{{{{title.name}}}}}</div>')
+        inner = f"{{{{{title.name}}}}}"
+        meta = by_slot.get("title_meta")
+        if meta is not None:
+            meta_class = meta.css_class or meta.name.lower()
+            meta_html = f'<span class="{meta_class}">{{{{{meta.name}}}}}</span>'
+            if meta.optional:
+                meta_html = f"{{{{#{meta.name}}}}}{meta_html}{{{{/{meta.name}}}}}"
+            inner = f"{inner} {meta_html}"
+        parts.append(f'<div class="{css_class}">{inner}</div>')
 
     for slot, css_default in (("front_audio", "audio"), ("front_image", "card-image")):
         field = by_slot.get(slot)
@@ -212,20 +304,47 @@ def _back_labels() -> dict[str, str]:
     return _current_language().back_labels
 
 
+def _recap_html(fields: list[NoteFieldDef]) -> str:
+    """Шапка бэка: поля с recap_on_back (обычно front_title + title_meta), повтор в одной строке."""
+    recap_fields = [f for f in fields if f.recap_on_back]
+    if not recap_fields:
+        return ""
+    pieces: list[str] = []
+    for field in recap_fields:
+        css_class = field.css_class or field.name.lower()
+        piece = f'<span class="{css_class}">{{{{{field.name}}}}}</span>'
+        if field.optional:
+            piece = f"{{{{#{field.name}}}}}{piece}{{{{/{field.name}}}}}"
+        pieces.append(piece)
+    return f'<div class="back-recap">{" ".join(pieces)}</div>'
+
+
 def _build_back_template() -> str:
     """Динамически генерирует BACK_TEMPLATE из активной схемы полей."""
     L = _back_labels()  # noqa: N806
+    fields = _active_fields()
     section_parts: list[str] = []
     tag_parts: list[str] = []
 
-    for field in _active_fields():
+    for idx, field in enumerate(fields):
+        if field.nest_in_previous:
+            continue  # уже отрендерено внутри div предыдущего section-поля, см. ниже
         if field.slot == "section":
             label_key = field.label_key or field.name.lower()
             css_class = field.css_class or field.name.lower()
             label = L.get(label_key, EN_BACK_LABELS.get(label_key, field.name))
+            content = f"{{{{{field.name}}}}}"
+            for nested in fields[idx + 1 :]:
+                if not nested.nest_in_previous:
+                    break
+                nested_class = nested.css_class or nested.name.lower()
+                nested_html = f'<span class="{nested_class}">{{{{{nested.name}}}}}</span>'
+                if nested.optional:
+                    nested_html = f"{{{{#{nested.name}}}}}{nested_html}{{{{/{nested.name}}}}}"
+                content += nested_html
             div = (
                 f'<div class="section"><div class="label">{label}</div>'
-                f'<div class="{css_class}">{{{{{field.name}}}}}</div></div>'
+                f'<div class="{css_class}">{content}</div></div>'
             )
             if field.optional:
                 section_parts.append(f"{{{{#{field.name}}}}}")
@@ -237,9 +356,12 @@ def _build_back_template() -> str:
             guard_open, guard_close = f"{{{{#{field.name}}}}}", f"{{{{/{field.name}}}}}"
             pill = f'<span class="tag">{{{{{field.name}}}}}</span>'
             tag_parts.append(f"{guard_open}{pill}{guard_close}")
-        # front_title / front_audio / front_image / hidden — на бэке не показываются
+        # front_title / front_audio / front_image / title_meta / hidden — на бэке не показываются
+        # напрямую (кроме recap_on_back — см. _recap_html выше)
 
-    parts = ["<hr id=answer>", *section_parts, '<div class="tags">', *tag_parts, "</div>"]
+    recap = _recap_html(fields)
+    parts = [recap] if recap else []
+    parts += ["<hr id=answer>", *section_parts, '<div class="tags">', *tag_parts, "</div>"]
     return "\n".join(parts)
 
 
