@@ -82,6 +82,16 @@ def test_populated_forms_not_flagged(tmp_path: Path) -> None:
     assert find_inconsistencies([card], cfg) == []
 
 
+def test_missing_forms_not_flagged_for_non_inflected_pos(tmp_path: Path) -> None:
+    """enrich/grammar.py заполняет forms только для noun/verb/adj — для остальных
+    частей речи forms=None корректно, даже когда enrich.grammar=true."""
+    enrich = EnrichConfig(grammar=True, examples=False, pronunciation=False)
+    cfg = _make_config(tmp_path, enrich=enrich)
+    card = _card(pos=POS.ADVERB, forms=None)
+
+    assert find_inconsistencies([card], cfg) == []
+
+
 def test_missing_example_flagged_when_examples_enabled(tmp_path: Path) -> None:
     enrich = EnrichConfig(grammar=False, examples=True, pronunciation=False)
     cfg = _make_config(tmp_path, enrich=enrich)

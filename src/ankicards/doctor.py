@@ -13,12 +13,14 @@ run_id-трассировку из #8) — поэтому не может быт
 from __future__ import annotations
 
 from .config import Config
+from .enrich.grammar import _INFLECTED_POS
 from .models import Card, Inconsistency, Status
 
 # (тумблер cfg.enrich.<toggle>, поле card.<field>) — 1:1 соответствие полям Card,
-# которые заполняет enrich/*.py при включённом тумблере.
+# которые заполняет enrich/*.py при включённом тумблере. grammar сюда не входит:
+# forms заполняются только для _INFLECTED_POS (см. enrich/grammar.py), у остальных
+# частей речи forms=None — это корректное состояние, а не незавершённый enrichment.
 _ENRICH_CHECKS: tuple[tuple[str, str], ...] = (
-    ("grammar", "forms"),
     ("examples", "example"),
     ("pronunciation", "pronunciation"),
 )
@@ -38,6 +40,19 @@ def find_inconsistencies(cards: list[Card], cfg: Config) -> list[Inconsistency]:
 
 def _check_card(card: Card, cfg: Config) -> list[Inconsistency]:
     problems: list[Inconsistency] = []
+
+    if cfg.enrich.grammar and card.pos in _INFLECTED_POS and not card.forms:
+        problems.append(
+            Inconsistency(
+                card_id=card.id,
+                word=card.word,
+                check="enrich.grammar",
+                reason=(
+                    f"enrich.grammar=true, pos={card.pos.value!r} требует forms, "
+                    "но card.forms пусто"
+                ),
+            )
+        )
 
     for toggle_name, field_name in _ENRICH_CHECKS:
         if not getattr(cfg.enrich, toggle_name) or getattr(card, field_name):
