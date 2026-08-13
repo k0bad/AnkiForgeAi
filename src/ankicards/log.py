@@ -54,10 +54,11 @@ def setup_logging() -> None:
         cache_logger_on_first_use=True,
     )
 
-    # Корневой логгер
+    # Корневой логгер — в stderr, а не stdout: `--json` команды печатают
+    # результат в stdout, и лог-строки не должны примешиваться в него.
     logging.basicConfig(
         format="%(message)s",
-        stream=sys.stdout,
+        stream=sys.stderr,
         level=level,
     )
 

@@ -76,7 +76,7 @@ async def test_finalize_accepted_marks_approved_and_persists_enrichment(
             c.example = "Jeg har et hus."
         return {}, set()
 
-    monkeypatch.setattr(review_module, "enrich_and_generate_media", _fake_enrich)
+    monkeypatch.setattr(review_module.actions, "enrich_and_generate_media", _fake_enrich)
 
     await review_module._finalize_accepted([card], db, cfg)
 
@@ -103,7 +103,7 @@ async def test_finalize_accepted_returns_incomplete_cards_to_review(
     ) -> tuple[dict, set[str]]:
         return {}, {card.id}
 
-    monkeypatch.setattr(review_module, "enrich_and_generate_media", _fake_enrich)
+    monkeypatch.setattr(review_module.actions, "enrich_and_generate_media", _fake_enrich)
 
     await review_module._finalize_accepted([card], db, cfg)
 
@@ -153,7 +153,7 @@ def test_review_pending_accept_then_quit_still_finalizes_accepted_card(
             c.example = "Jeg har et hus."
         return {}, set()
 
-    monkeypatch.setattr(review_module, "enrich_and_generate_media", _fake_enrich)
+    monkeypatch.setattr(review_module.actions, "enrich_and_generate_media", _fake_enrich)
 
     review_module.review_pending(db, cfg)
 
