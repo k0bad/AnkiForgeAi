@@ -69,6 +69,9 @@ images:
   # Провайдер: unsplash | pexels | pixabay | openverse
   # Ключ нужного провайдера — в .env (см. .env.example). openverse ключа не требует.
   provider: unsplash
+  # Опционально: если provider не нашёл картинку (пусто/нет ключа/403/429/5xx) —
+  # пробовать эти провайдеры по очереди. Пусто по умолчанию = fallback выключен.
+  fallback_providers: []         # напр. [pexels, pixabay, openverse]
   per_page: 5                    # сколько вариантов показывать на ревью
   # Качаем только для конкретных существительных (не абстрактных)
   only_for_pos: [noun]

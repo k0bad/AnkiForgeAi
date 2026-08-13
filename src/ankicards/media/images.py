@@ -6,6 +6,13 @@
 - pixabay   — https://pixabay.com/api/docs/, 100 запросов/60с, нужен ключ
 - openverse — https://api.openverse.org/v1/#tag/images, ключ не нужен (CC-агрегатор)
 
+Если cfg.images.fallback_providers не пуст, при пустом результате/ошибке текущего
+провайдера (нет ключа, 403/429/5xx) поиск переходит к следующему провайдеру из
+списка по очереди; финальная неудача не считается ошибкой — карточка остаётся
+без картинки, как и при единственном провайдере. Пустой fallback_providers
+(значение по умолчанию) поведение не меняет: ошибка/пустой результат
+единственного провайдера ведут себя как раньше.
+
 Скачивает только для существительных (cfg.images.only_for_pos).
 Имя файла: {card.id}.jpg, ресайзит до cfg.images.resize_to.
 """
@@ -144,15 +151,42 @@ _PROVIDERS: dict[str, Callable[[str, Config, int], Awaitable[list[dict[str, str]
 
 
 async def search_images(query: str, cfg: Config, count: int = 5) -> list[dict[str, str]]:
-    """Поиск картинок через cfg.images.provider. Возвращает [{url, thumb, author, ...}]."""
-    search = _PROVIDERS.get(cfg.images.provider)
-    if search is None:
-        raise ValueError(
-            f"Неизвестный провайдер картинок: {cfg.images.provider!r}. "
-            f"Ожидается один из: {', '.join(_PROVIDERS)}"
-        )
+    """Поиск картинок через cfg.images.provider, с fallback на cfg.images.fallback_providers.
+
+    Без fallback_providers (по умолчанию) ведёт себя как раньше: ошибка или пустой
+    результат единственного провайдера возвращаются/пробрасываются как есть.
+    С fallback_providers — любая ошибка провайдера в цепочке (в т.ч. последнего:
+    отсутствующий ключ, 403/429/5xx) или пустой результат переходят к следующему;
+    если не дал никто — возвращается пустой список, а не исключение.
+    """
+    provider_names = [cfg.images.provider, *cfg.images.fallback_providers]
+    chain: list[tuple[str, Callable[[str, Config, int], Awaitable[list[dict[str, str]]]]]] = []
+    for name in provider_names:
+        search = _PROVIDERS.get(name)
+        if search is None:
+            raise ValueError(
+                f"Неизвестный провайдер картинок: {name!r}. "
+                f"Ожидается один из: {', '.join(_PROVIDERS)}"
+            )
+        chain.append((name, search))
+
     per_page = min(max(count, 1), cfg.images.per_page)
-    return await search(query, cfg, per_page)
+    has_fallback = len(chain) > 1
+
+    for name, search in chain:
+        try:
+            results = await search(query, cfg, per_page)
+        except (RuntimeError, httpx.HTTPError) as exc:
+            if not has_fallback:
+                raise
+            logger.warning("images.provider_failed", provider=name, query=query, error=str(exc))
+            continue
+        if results:
+            return results
+        if has_fallback:
+            logger.info("images.provider_empty", provider=name, query=query)
+
+    return []
 
 
 @http_retry

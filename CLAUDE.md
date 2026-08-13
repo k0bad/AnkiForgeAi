@@ -101,6 +101,7 @@ Key settings to know:
 - `dedupe.ai_adjudication: true` — for fuzzy matches, ask the LLM whether it's a real duplicate before falling back to human review (`dedupe.judge_review`, `prompts/dedupe_judge.md`); `dedupe.judge_model` optionally pins a cheaper/faster model for just that call (empty = `llm.model`, same provider)
 - `tts.voice_female` / `tts.voice_male` — come from the active language profile by default (`languages/{code}/language.yaml` → `tts:`); override in `config.yaml` to pin a different voice
 - `images.provider: unsplash | pexels | pixabay | openverse` — search backend for `media/images.py`; matching API key goes in `.env` (`UNSPLASH_ACCESS_KEY` / `PEXELS_API_KEY` / `PIXABAY_API_KEY`), `openverse` needs none
+- `images.fallback_providers: []` — opt-in list of providers to try in order if `images.provider` returns nothing (empty/no key/403/429/5xx); empty by default, so behavior is unchanged unless explicitly configured
 - `images.only_for_pos: [noun]` — images generated only for nouns
 - `enrich.grammar` / `enrich.examples` / `enrich.pronunciation` — toggle individual enrichment stages (set by `ankiforgeai setup`)
 
