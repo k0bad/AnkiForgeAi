@@ -44,3 +44,9 @@ See [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for the full architecture reference
 - **Never commit API keys** in code, config, or prompts
 - Use `.env.example` with placeholder values only
 - Internal IPs/URLs belong in environment variables, not code
+
+## Contributors
+
+Special thanks to our contributors:
+
+- [@eugene-vanyan](https://github.com/eugene-vanyan) — Pipeline tracing, error handling, doctor consistency checks

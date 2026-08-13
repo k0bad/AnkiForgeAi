@@ -134,8 +134,8 @@ async def run_ingest_pipeline(
     incomplete_ids: set[str] = set()
 
     if auto_enrich and accepted:
+        # Pronunciation и translation — базовые стадии (одна попытка в batch-блоке)
         try:
-            # Сначала транскрипция, потом перевод, грамматика и примеры
             if cfg.enrich.pronunciation:
                 logger.info("stage.start", stage="pronunciation", count=len(accepted))
                 await enrich_pronunciation_batch(accepted)
@@ -145,19 +145,11 @@ async def run_ingest_pipeline(
                 if not card.translation:
                     await enrich_translation(card)
             logger.info("stage.done", stage="translation")
-            if cfg.enrich.grammar:
-                logger.info("stage.start", stage="grammar", count=len(accepted))
-                await enrich_grammar_batch(accepted)
-                logger.info("stage.done", stage="grammar")
-            if cfg.enrich.examples:
-                logger.info("stage.start", stage="examples", count=len(accepted))
-                await enrich_example_batch(accepted)
-                logger.info("stage.done", stage="examples")
-            stats["enriched"] = len(accepted)
         except Exception as e:
             stats["errors"] += 1
             _record(db, "warning", "enrich_failed", None, error=str(e), count=len(accepted))
 
+        # Per-card translation retry (если не заполнилось)
         for card in accepted:
             if card.translation:
                 continue
@@ -180,6 +172,7 @@ async def run_ingest_pipeline(
                         details={"stage": "translation"},
                     )
 
+        # Grammar и examples — обработаны через _run_enrich_stage с per-card ошибками
         if cfg.enrich.grammar:
             await _run_enrich_stage(
                 "grammar",

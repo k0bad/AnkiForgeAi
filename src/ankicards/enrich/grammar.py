@@ -16,6 +16,7 @@ from ..llm import call_json, load_prompt
 from ..models import POS, Card
 
 INFLECTED_POS = {POS.NOUN, POS.VERB, POS.ADJECTIVE}
+_INFLECTED_POS = INFLECTED_POS  # для совместимости с doctor.py
 
 
 async def enrich_grammar(card: Card) -> Card:
