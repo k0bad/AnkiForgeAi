@@ -13,9 +13,12 @@ import json
 import os
 from typing import Any
 
-from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
+from tenacity import RetryCallState, retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from .config import Config, get_config, get_secrets
+from .log import get_logger
+
+logger = get_logger(__name__)
 
 
 def _is_transient(exc: BaseException) -> bool:
@@ -24,11 +27,17 @@ def _is_transient(exc: BaseException) -> bool:
     return not isinstance(exc, (RuntimeError, ValueError))
 
 
+def _log_retry(retry_state: RetryCallState) -> None:
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    logger.warning("llm.retry", attempt=retry_state.attempt_number, error=str(exc))
+
+
 _llm_retry = retry(
     retry=retry_if_exception(_is_transient),
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
     reraise=True,
+    before_sleep=_log_retry,
 )
 
 

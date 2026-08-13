@@ -15,7 +15,10 @@ from pathlib import Path
 import edge_tts
 
 from ..config import Config, get_language
+from ..log import get_logger
 from ..models import POS, Card
+
+logger = get_logger(__name__)
 
 
 def _pronounceable_text(card: Card) -> str:
@@ -43,9 +46,11 @@ async def generate_audio(card: Card, cfg: Config) -> Card:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     text = _pronounceable_text(card)
+    voice = _voice_for(cfg)
+    logger.debug("tts.synthesize", card_id=card.id, voice=voice)
     await _synthesize(
         text=text,
-        voice=_voice_for(cfg),
+        voice=voice,
         out_path=out_path,
         rate=cfg.tts.rate,
         pitch=cfg.tts.pitch,
