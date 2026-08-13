@@ -136,7 +136,9 @@ class TagsConfig(BaseModel):
     source_prefix: str = "source"
 
 
-NoteFieldSlot = Literal["front_title", "front_audio", "front_image", "section", "tag", "hidden"]
+NoteFieldSlot = Literal[
+    "front_title", "front_audio", "front_image", "title_meta", "section", "tag", "hidden"
+]
 
 
 class NoteFieldDef(BaseModel):
@@ -149,6 +151,11 @@ class NoteFieldDef(BaseModel):
     optional: bool = False  # section: обернуть в {{#Field}}...{{/Field}} на бэке
     label_key: str | None = None  # ключ в back_labels/EN_BACK_LABELS; по умолчанию name.lower()
     css_class: str | None = None  # по умолчанию name.lower()
+    # title_meta/front_title поле: повторить в шапке бэка (см. _build_back_template)
+    recap_on_back: bool = False
+    # section-поле: не открывать свою секцию, вложить в div предыдущего section-поля
+    # (например ExampleTranslation внутрь Example — один блок "пример + перевод")
+    nest_in_previous: bool = False
 
 
 class AnkiProfileConfig(BaseModel):
