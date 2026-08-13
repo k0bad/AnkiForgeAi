@@ -8,11 +8,13 @@
     sync                          Обновить кэш заметок из Anki
     stats                         Статистика по статусам
     init                          Инициализация БД и Note Type в Anki
+    doctor                        Проверка согласованности карточек с enrich-конфигом
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 
 import typer
@@ -32,6 +34,7 @@ from .anki.notetype import _get_note_type_name as get_note_type_name
 from .anki.sync import sync_anki_to_cache
 from .config import get_config
 from .db import Database
+from .doctor import find_inconsistencies
 from .ingest.topic import ingest_by_topic
 from .ingest.url import ingest_from_url
 from .log import bound_run
@@ -211,6 +214,35 @@ def stats() -> None:
     table.add_row("[dim]anki_cache[/]", str(len(anki_cached)))
 
     console.print(table)
+
+
+@app.command()
+def doctor(
+    as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
+) -> None:
+    """Сверить approved/pushed карточки с включёнными enrich/images тумблерами (issue #9)."""
+    cfg = get_config()
+    db = Database(cfg.paths.db)
+
+    cards = db.get_by_status(Status.APPROVED) + db.get_by_status(Status.PUSHED)
+    problems = find_inconsistencies(cards, cfg)
+
+    if as_json:
+        print(json.dumps([p.model_dump() for p in problems], ensure_ascii=False, indent=2))
+    elif not problems:
+        console.print("[green]✓[/] Несоответствий не найдено")
+    else:
+        table = Table(title=f"doctor — найдено несоответствий: {len(problems)}")
+        table.add_column("Card ID", style="dim")
+        table.add_column("Слово", style="cyan")
+        table.add_column("Проверка")
+        table.add_column("Причина")
+        for p in problems:
+            table.add_row(p.card_id, p.word, p.check, p.reason)
+        console.print(table)
+
+    if problems:
+        raise typer.Exit(code=1)
 
 
 def _print_stats(stats: dict) -> None:

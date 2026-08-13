@@ -49,7 +49,8 @@ def _patch_get(monkeypatch: pytest.MonkeyPatch, response_json: dict[str, Any]) -
 
 
 def _patch_secrets(monkeypatch: pytest.MonkeyPatch, **keys: str) -> None:
-    fake = Secrets(**keys)
+    # model_construct, не Secrets(**keys): BaseSettings иначе подмешивает реальные .env/os.environ
+    fake = Secrets.model_construct(**keys)
     monkeypatch.setattr(images_module, "get_secrets", lambda: fake)
 
 
