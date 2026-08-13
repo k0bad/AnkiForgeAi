@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS cards (
     word                TEXT NOT NULL,
     pronunciation       TEXT,
     translation         TEXT NOT NULL,
+    image_query         TEXT,           -- англ. gloss для поиска картинок (issue #10)
     example             TEXT,
     example_translation TEXT,
     pos                 TEXT NOT NULL,
@@ -87,6 +88,10 @@ class Database:
             conn.execute("ALTER TABLE audit_log ADD COLUMN run_id TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_run ON audit_log(run_id)")
 
+        card_cols = {row["name"] for row in conn.execute("PRAGMA table_info(cards)")}
+        if "image_query" not in card_cols:
+            conn.execute("ALTER TABLE cards ADD COLUMN image_query TEXT")
+
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
         """Соединение с авто-commit/rollback и Row factory."""
@@ -109,15 +114,16 @@ class Database:
         with self.connect() as conn:
             conn.execute(
                 """INSERT INTO cards (
-                    id, word, pronunciation, translation, example, example_translation,
-                    pos, forms, level, topic, source, image, audio, tags, status,
-                    date_added, anki_note_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    id, word, pronunciation, translation, image_query, example,
+                    example_translation, pos, forms, level, topic, source, image, audio,
+                    tags, status, date_added, anki_note_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     card.id,
                     card.word,
                     card.pronunciation,
                     card.translation,
+                    card.image_query,
                     card.example,
                     card.example_translation,
                     card.pos.value,
@@ -215,6 +221,7 @@ def _row_to_card(row: sqlite3.Row) -> Card:
         word=row["word"],
         pronunciation=row["pronunciation"],
         translation=row["translation"],
+        image_query=row["image_query"],
         example=row["example"],
         example_translation=row["example_translation"],
         pos=row["pos"],

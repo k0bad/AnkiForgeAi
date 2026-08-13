@@ -79,6 +79,7 @@ class Card(BaseModel):
     word: str  # основная форма (lemma)
     pronunciation: str | None = None  # практическая транскрипция или IPA — см. config.transcription
     translation: str  # 1-2 варианта
+    image_query: str | None = None  # англ. gloss для поиска картинок (issue #10)
     example: str | None = None  # пример на норвежском
     example_translation: str | None = None  # перевод примера
 

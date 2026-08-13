@@ -24,6 +24,7 @@ from ankicards.config import (
     TTSConfig,
 )
 from ankicards.media import images as images_module
+from ankicards.models import POS, Card
 
 
 def _patch_get(monkeypatch: pytest.MonkeyPatch, response_json: dict[str, Any]) -> dict[str, Any]:
@@ -194,3 +195,39 @@ async def test_openverse_needs_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert results[0]["author"] == "Dana"
     assert captured["url"] == images_module.OPENVERSE_SEARCH_URL
+
+
+async def _fake_search(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    """Подменяет search_images, чтобы поймать query без реального HTTP-вызова."""
+    captured: dict[str, str] = {}
+
+    async def fake(query: str, cfg: Config, count: int) -> list[dict[str, str]]:
+        captured["query"] = query
+        return []
+
+    monkeypatch.setattr(images_module, "search_images", fake)
+    return captured
+
+
+async def test_attach_image_uses_image_query_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = await _fake_search(monkeypatch)
+    cfg = _make_config()
+    card = Card(word="hus", pos=POS.NOUN, translation="дом", image_query="house")
+
+    await images_module.attach_image(card, cfg, auto_pick=True)
+
+    assert captured["query"] == "house"
+
+
+async def test_attach_image_falls_back_to_word_without_image_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = await _fake_search(monkeypatch)
+    cfg = _make_config()
+    card = Card(word="hus", pos=POS.NOUN, translation="дом")
+
+    await images_module.attach_image(card, cfg, auto_pick=True)
+
+    assert captured["query"] == "hus"

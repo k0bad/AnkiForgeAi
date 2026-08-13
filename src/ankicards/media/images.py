@@ -21,7 +21,10 @@ from PIL import Image
 
 from .._net import http_retry
 from ..config import Config, get_secrets
+from ..log import get_logger
 from ..models import Card
+
+logger = get_logger(__name__)
 
 UNSPLASH_SEARCH_URL = "https://api.unsplash.com/search/photos"
 PEXELS_SEARCH_URL = "https://api.pexels.com/v1/search"
@@ -175,8 +178,10 @@ async def attach_image(card: Card, cfg: Config, auto_pick: bool = False) -> Card
     if card.pos.value not in cfg.images.only_for_pos:
         return card
 
-    results = await search_images(card.word, cfg=cfg, count=cfg.images.per_page)
+    query = card.image_query or card.word
+    results = await search_images(query, cfg=cfg, count=cfg.images.per_page)
     if not results:
+        logger.warning("images.search_empty", card_id=card.id, word=card.word, query=query)
         return card
     if not auto_pick:
         return card
