@@ -21,6 +21,9 @@ import httpx
 
 from .._net import http_retry
 from ..config import Config
+from ..log import get_logger
+
+logger = get_logger(__name__)
 
 ANKI_CONNECT_VERSION = 6
 DEFAULT_TIMEOUT = 30.0
@@ -49,14 +52,18 @@ class AnkiConnect:
     async def _call(self, action: str, **params: Any) -> Any:
         """Вызвать AnkiConnect action и вернуть result."""
         payload = {"action": action, "version": ANKI_CONNECT_VERSION, "params": params}
+        logger.debug("anki.call", action=action)
         try:
             data = await self._post(payload)
         except httpx.HTTPError as e:
+            logger.warning("anki.http_error", action=action, error=str(e))
             raise AnkiConnectError(f"HTTP error calling {action}: {e}") from e
 
         if not isinstance(data, dict) or "error" not in data or "result" not in data:
+            logger.warning("anki.malformed_response", action=action)
             raise AnkiConnectError(f"Malformed AnkiConnect response for {action}: {data!r}")
         if data["error"] is not None:
+            logger.warning("anki.error", action=action, error=data["error"])
             raise AnkiConnectError(f"AnkiConnect error on {action}: {data['error']}")
         return data["result"]
 

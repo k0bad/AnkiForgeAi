@@ -8,7 +8,10 @@ from __future__ import annotations
 
 from ..config import Config
 from ..db import Database
+from ..log import get_logger
 from .connect import AnkiConnect
+
+logger = get_logger(__name__)
 
 BATCH_SIZE = 200
 
@@ -16,8 +19,10 @@ BATCH_SIZE = 200
 async def sync_anki_to_cache(db: Database, anki: AnkiConnect, cfg: Config) -> int:
     """Скачать все заметки из Anki deck в anki_cache. Вернуть количество."""
     query = f'deck:"{cfg.anki.deck_name}"'
+    logger.info("anki_sync.start", deck=cfg.anki.deck_name)
     note_ids = await anki.find_notes(query)
     if not note_ids:
+        logger.info("anki_sync.done", deck=cfg.anki.deck_name, count=0)
         return 0
 
     total = 0
@@ -27,6 +32,7 @@ async def sync_anki_to_cache(db: Database, anki: AnkiConnect, cfg: Config) -> in
         for info in infos:
             note_id = info.get("noteId")
             if note_id is None:
+                logger.warning("anki_sync.note_missing_id", info=info)
                 continue
             raw_fields = info.get("fields", {})
             fields = {name: entry.get("value", "") for name, entry in raw_fields.items()}
@@ -39,4 +45,5 @@ async def sync_anki_to_cache(db: Database, anki: AnkiConnect, cfg: Config) -> in
                 tags=list(tags),
             )
             total += 1
+    logger.info("anki_sync.done", deck=cfg.anki.deck_name, count=total)
     return total

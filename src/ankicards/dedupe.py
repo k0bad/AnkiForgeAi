@@ -25,7 +25,10 @@ from rapidfuzz import fuzz, process
 from .config import Config
 from .db import Database
 from .llm import call_text, load_prompt
+from .log import get_logger
 from .models import Card, Decision, DuplicateMatch
+
+logger = get_logger(__name__)
 
 
 def _normalize(word: str) -> str:
@@ -157,7 +160,8 @@ async def judge_review(card: Card, decision: Decision, cfg: Config) -> Decision:
             score=match.score,
         )
         verdict = (await call_text(prompt, model=cfg.dedupe.judge_model or None)).strip().upper()
-    except Exception:
+    except Exception as e:
+        logger.warning("dedupe.judge_failed", card_id=card.id, word=card.word, error=str(e))
         return decision
 
     if verdict == "SAME":

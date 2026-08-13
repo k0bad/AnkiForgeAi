@@ -33,6 +33,7 @@ def setup_logging() -> None:
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,  # без него exc_info=True рендерится как голое "true"
         structlog.processors.UnicodeDecoder(),
     ]
 
@@ -78,6 +79,12 @@ def bound_run(command: str) -> Iterator[str]:
     structlog.contextvars.bind_contextvars(run_id=run_id, command=command)
     try:
         yield run_id
+    except Exception as e:
+        # Без этого необработанные исключения (Anki недоступен, сбой БД и т.п.)
+        # вылетают голым traceback'ом мимо structlog — команда падает без единой
+        # структурированной записи о том, что и почему сломалось.
+        get_logger(__name__).error("command.failed", error=str(e), exc_info=True)
+        raise
     finally:
         structlog.contextvars.clear_contextvars()
 

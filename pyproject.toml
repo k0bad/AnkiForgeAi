@@ -1,6 +1,6 @@
 [project]
 name = "ankiforgeai"
-version = "0.2.0"
+version = "0.3.0"
 description = "AnkiForgeAI — multilingual vocabulary pipeline with AI-powered flashcard generation for any language."
 readme = "README.md"
 license = { file = "LICENSE" }
