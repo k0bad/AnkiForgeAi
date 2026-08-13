@@ -22,7 +22,7 @@ from rich.table import Table
 from ..config import Config
 from ..db import Database
 from ..models import Card, Decision, Status
-from ..pipeline import enrich_and_generate_media
+from . import actions
 
 console = Console()
 
@@ -65,18 +65,16 @@ def review_pending(db: Database, cfg: Config) -> None:
 
             verb = action.split()[0]
             if verb == "accept":
-                # Enrich/media запускаются батчем в конце сессии — см. _finalize_accepted
+                # Enrich/media запускаются батчем в конце сессии — см. actions.accept_cards
                 # ниже (issue #11: раньше accept просто менял статус, ничего не enrich'я).
                 accepted.append(card)
                 db.log_action("review_accept", card_id=card.id, details={})
                 console.print("[green]✓ approved (enrichment — в конце сессии)[/]")
             elif verb == "skip":
-                db.update_status(card.id, Status.SKIPPED)
-                db.log_action("review_skip", card_id=card.id, details={})
+                actions.skip_cards([card.id], db)
                 console.print("[yellow]skipped[/]")
             elif verb == "suspend":
-                db.update_status(card.id, Status.SUSPENDED)
-                db.log_action("review_suspend", card_id=card.id, details={})
+                actions.suspend_cards([card.id], db)
                 console.print("[yellow]suspended[/]")
             elif verb == "edit":
                 _edit_card(db, card)
@@ -87,19 +85,15 @@ def review_pending(db: Database, cfg: Config) -> None:
 
 
 async def _finalize_accepted(cards: list[Card], db: Database, cfg: Config) -> None:
-    """Прогнать enrich_and_generate_media для карточек, принятых за сессию ревью,
-    и сохранить результат — единственное место, которое реально пишет их в БД
-    (accept-ветка выше только собирает карточки в список, статус в SQLite ещё
-    не меняет — старый status=review/pending остаётся, пока не отработает enrichment)."""
-    _, incomplete_ids = await enrich_and_generate_media(cards, db, cfg)
+    """Прогнать enrich + media для карточек, принятых за сессию ревью, и сохранить
+    результат (accept-ветка выше только собирает карточки в список, статус в
+    SQLite ещё не меняет — старый status=review/pending остаётся, пока не
+    отработает actions.accept_cards)."""
+    results = await actions.accept_cards([c.id for c in cards], db, cfg)
     for card in cards:
-        if card.id in incomplete_ids:
-            card.status = Status.REVIEW
+        card.status = Status(results[card.id])
+        if card.status == Status.REVIEW:
             console.print(f"[yellow]⚠ {card.word}: enrichment неполный — возвращено в review[/]")
-        else:
-            card.status = Status.APPROVED
-        db.update_card(card)
-        db.log_action("review_finalized", card_id=card.id, details={"status": card.status.value})
 
 
 def _show_card(card: Card, decision: Decision | None) -> None:
@@ -136,9 +130,8 @@ def _show_card(card: Card, decision: Decision | None) -> None:
 
 def _edit_card(db: Database, card: Card) -> None:
     """Простой редактор ключевых текстовых полей."""
-    fields = ["word", "translation", "example", "example_translation"]
     updates: dict[str, str] = {}
-    for field in fields:
+    for field in actions.EDITABLE_FIELDS:
         current = getattr(card, field) or ""
         new_value = questionary.text(f"{field}:", default=current).ask()
         if new_value is None:
@@ -150,13 +143,7 @@ def _edit_card(db: Database, card: Card) -> None:
         console.print("[dim]Изменений нет.[/]")
         return
 
-    with db.connect() as conn:
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
-        conn.execute(
-            f"UPDATE cards SET {set_clause} WHERE id = ?",
-            (*updates.values(), card.id),
-        )
-    db.log_action("review_edit", card_id=card.id, details=updates)
+    actions.edit_card(card.id, updates, db)
     console.print("[green]✓ обновлено[/]")
 
 

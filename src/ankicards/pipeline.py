@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 from .anki.connect import AnkiConnect, AnkiConnectError
+from .anki.notetype import _get_note_type_name as get_note_type_name
 from .anki.notetype import card_to_anki_fields
 from .config import Config
 from .db import Database
@@ -26,6 +27,22 @@ from .media.tts import generate_audio
 from .models import Card, Status
 
 logger = get_logger(__name__)
+
+
+class NoteTypeMissingError(Exception):
+    """Note Type из активного языкового профиля не существует в Anki.
+
+    Обычно значит, что anki.note_type в language.yaml сменился (например,
+    после апдейта репо через git pull), а `ankiforgeai init` не переигрывался,
+    чтобы (пере)создать Note Type в самом Anki.
+    """
+
+    def __init__(self, note_type: str) -> None:
+        self.note_type = note_type
+        super().__init__(
+            f"Note Type '{note_type}' не найден в Anki — запусти `ankiforgeai init`, "
+            "чтобы создать его (или синхронизировать дизайн, если он уже есть)."
+        )
 
 
 def _record(db: Database, level: str, action: str, card_id: str | None, **details: object) -> None:
@@ -259,6 +276,11 @@ async def push_approved(db: Database, anki: AnkiConnect, cfg: Config) -> int:
 
     logger.info("stage.start", stage="push", count=len(approved))
     await anki.ensure_deck()
+
+    note_type = get_note_type_name()
+    if note_type not in await anki.model_names():
+        raise NoteTypeMissingError(note_type)
+
     pushed = 0
     for card in approved:
         try:
