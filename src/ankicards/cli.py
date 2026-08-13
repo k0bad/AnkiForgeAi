@@ -8,11 +8,13 @@
     sync                          Обновить кэш заметок из Anki
     stats                         Статистика по статусам
     init                          Инициализация БД и Note Type в Anki
+    doctor                        Проверка согласованности карточек с enrich-конфигом
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 
 import typer
@@ -32,8 +34,10 @@ from .anki.notetype import _get_note_type_name as get_note_type_name
 from .anki.sync import sync_anki_to_cache
 from .config import get_config
 from .db import Database
+from .doctor import find_inconsistencies
 from .ingest.topic import ingest_by_topic
 from .ingest.url import ingest_from_url
+from .log import bound_run
 from .models import Status
 from .pipeline import push_approved, run_ingest_pipeline
 from .review.interactive import review_pending
@@ -106,7 +110,8 @@ def init() -> None:
         )
         console.print(f"[green]✓[/] Note Type создан: {note_type}")
 
-    asyncio.run(_run())
+    with bound_run("init"):
+        asyncio.run(_run())
 
 
 @ingest_app.command("url")
@@ -126,7 +131,8 @@ def ingest_url_cmd(
         stats = await run_ingest_pipeline(cards, db=db, cfg=cfg)
         _print_stats(stats)
 
-    asyncio.run(_run())
+    with bound_run("ingest_url"):
+        asyncio.run(_run())
 
 
 @ingest_app.command("topic")
@@ -147,7 +153,8 @@ def ingest_topic_cmd(
         stats = await run_ingest_pipeline(cards, db=db, cfg=cfg)
         _print_stats(stats)
 
-    asyncio.run(_run())
+    with bound_run("ingest_topic"):
+        asyncio.run(_run())
 
 
 @app.command()
@@ -155,7 +162,8 @@ def review() -> None:
     """Интерактивный ревью pending-карточек."""
     cfg = get_config()
     db = Database(cfg.paths.db)
-    review_pending(db, cfg)
+    with bound_run("review"):
+        review_pending(db, cfg)
 
 
 @app.command()
@@ -169,7 +177,8 @@ def push() -> None:
         count = await push_approved(db, anki, cfg)
         console.print(f"[green]✓[/] Отправлено в Anki: {count}")
 
-    asyncio.run(_run())
+    with bound_run("push"):
+        asyncio.run(_run())
 
 
 @app.command()
@@ -183,7 +192,8 @@ def sync() -> None:
         count = await sync_anki_to_cache(db, anki, cfg)
         console.print(f"[green]✓[/] Синхронизировано заметок: {count}")
 
-    asyncio.run(_run())
+    with bound_run("sync"):
+        asyncio.run(_run())
 
 
 @app.command()
@@ -204,6 +214,35 @@ def stats() -> None:
     table.add_row("[dim]anki_cache[/]", str(len(anki_cached)))
 
     console.print(table)
+
+
+@app.command()
+def doctor(
+    as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
+) -> None:
+    """Сверить approved/pushed карточки с включёнными enrich/images тумблерами (issue #9)."""
+    cfg = get_config()
+    db = Database(cfg.paths.db)
+
+    cards = db.get_by_status(Status.APPROVED) + db.get_by_status(Status.PUSHED)
+    problems = find_inconsistencies(cards, cfg)
+
+    if as_json:
+        print(json.dumps([p.model_dump() for p in problems], ensure_ascii=False, indent=2))
+    elif not problems:
+        console.print("[green]✓[/] Несоответствий не найдено")
+    else:
+        table = Table(title=f"doctor — найдено несоответствий: {len(problems)}")
+        table.add_column("Card ID", style="dim")
+        table.add_column("Слово", style="cyan")
+        table.add_column("Проверка")
+        table.add_column("Причина")
+        for p in problems:
+            table.add_row(p.card_id, p.word, p.check, p.reason)
+        console.print(table)
+
+    if problems:
+        raise typer.Exit(code=1)
 
 
 def _print_stats(stats: dict) -> None:

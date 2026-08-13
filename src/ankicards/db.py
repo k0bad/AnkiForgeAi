@@ -17,6 +17,8 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
+import structlog
+
 from .models import Card, Status
 
 SCHEMA = """
@@ -48,7 +50,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
     timestamp   TEXT NOT NULL,
     action      TEXT NOT NULL,          -- create / merge / skip / push / sync / ...
     card_id     TEXT,
-    details     TEXT                    -- JSON
+    details     TEXT,                   -- JSON
+    run_id      TEXT                    -- одна CLI-команда = один run_id (см. log.bound_run)
 );
 CREATE INDEX IF NOT EXISTS idx_audit_card ON audit_log(card_id);
 CREATE INDEX IF NOT EXISTS idx_audit_ts   ON audit_log(timestamp);
@@ -75,6 +78,14 @@ class Database:
     def _init_schema(self) -> None:
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            self._migrate(conn)
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        """Догнать схему существующих БД, созданных до текущей версии SCHEMA."""
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(audit_log)")}
+        if "run_id" not in cols:
+            conn.execute("ALTER TABLE audit_log ADD COLUMN run_id TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_run ON audit_log(run_id)")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -153,14 +164,17 @@ class Database:
     # ───────────── Audit ─────────────
 
     def log_action(self, action: str, card_id: str | None, details: dict) -> None:
+        run_id = structlog.contextvars.get_contextvars().get("run_id")
         with self.connect() as conn:
             conn.execute(
-                "INSERT INTO audit_log (timestamp, action, card_id, details) VALUES (?, ?, ?, ?)",
+                "INSERT INTO audit_log (timestamp, action, card_id, details, run_id) "
+                "VALUES (?, ?, ?, ?, ?)",
                 (
                     datetime.utcnow().isoformat(timespec="seconds"),
                     action,
                     card_id,
                     json.dumps(details, ensure_ascii=False),
+                    run_id,
                 ),
             )
 
