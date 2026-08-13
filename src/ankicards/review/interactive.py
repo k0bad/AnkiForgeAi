@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import questionary
@@ -21,53 +22,84 @@ from rich.table import Table
 from ..config import Config
 from ..db import Database
 from ..models import Card, Decision, Status
+from ..pipeline import enrich_and_generate_media
 
 console = Console()
 
 
 def review_pending(db: Database, cfg: Config) -> None:
-    """Главный цикл ревью."""
+    """Главный цикл ревью.
+
+    Остаётся синхронной (questionary.ask() внутри не дружит с уже запущенным
+    event loop'ом) — enrichment принятых карточек прогоняется через свой
+    собственный asyncio.run() в finally, поэтому саму функцию нельзя вызывать
+    из кода, который уже крутится в event loop'е.
+    """
     cards = db.get_by_status(Status.REVIEW) + db.get_by_status(Status.PENDING)
     if not cards:
         console.print("[green]Нечего ревьюить.[/]")
         return
 
     console.print(f"[cyan]Карточек на ревью: {len(cards)}[/]")
+    accepted: list[Card] = []
 
+    try:
+        for card in cards:
+            decision = _load_last_decision(db, card.id)
+            _show_card(card, decision)
+
+            action = questionary.select(
+                "Действие:",
+                choices=[
+                    "accept   — одобрить (approved)",
+                    "skip     — пропустить (skipped)",
+                    "suspend  — отложить (suspended)",
+                    "edit     — редактировать поля",
+                    "quit     — выйти из ревью",
+                ],
+            ).ask()
+
+            if action is None or action.startswith("quit"):
+                console.print("[yellow]Выход.[/]")
+                return
+
+            verb = action.split()[0]
+            if verb == "accept":
+                # Enrich/media запускаются батчем в конце сессии — см. _finalize_accepted
+                # ниже (issue #11: раньше accept просто менял статус, ничего не enrich'я).
+                accepted.append(card)
+                db.log_action("review_accept", card_id=card.id, details={})
+                console.print("[green]✓ approved (enrichment — в конце сессии)[/]")
+            elif verb == "skip":
+                db.update_status(card.id, Status.SKIPPED)
+                db.log_action("review_skip", card_id=card.id, details={})
+                console.print("[yellow]skipped[/]")
+            elif verb == "suspend":
+                db.update_status(card.id, Status.SUSPENDED)
+                db.log_action("review_suspend", card_id=card.id, details={})
+                console.print("[yellow]suspended[/]")
+            elif verb == "edit":
+                _edit_card(db, card)
+    finally:
+        if accepted:
+            console.print(f"[cyan]Enrich + media для {len(accepted)} карточек...[/]")
+            asyncio.run(_finalize_accepted(accepted, db, cfg))
+
+
+async def _finalize_accepted(cards: list[Card], db: Database, cfg: Config) -> None:
+    """Прогнать enrich_and_generate_media для карточек, принятых за сессию ревью,
+    и сохранить результат — единственное место, которое реально пишет их в БД
+    (accept-ветка выше только собирает карточки в список, статус в SQLite ещё
+    не меняет — старый status=review/pending остаётся, пока не отработает enrichment)."""
+    _, incomplete_ids = await enrich_and_generate_media(cards, db, cfg)
     for card in cards:
-        decision = _load_last_decision(db, card.id)
-        _show_card(card, decision)
-
-        action = questionary.select(
-            "Действие:",
-            choices=[
-                "accept   — одобрить (approved)",
-                "skip     — пропустить (skipped)",
-                "suspend  — отложить (suspended)",
-                "edit     — редактировать поля",
-                "quit     — выйти из ревью",
-            ],
-        ).ask()
-
-        if action is None or action.startswith("quit"):
-            console.print("[yellow]Выход.[/]")
-            return
-
-        verb = action.split()[0]
-        if verb == "accept":
-            db.update_status(card.id, Status.APPROVED)
-            db.log_action("review_accept", card_id=card.id, details={})
-            console.print("[green]✓ approved[/]")
-        elif verb == "skip":
-            db.update_status(card.id, Status.SKIPPED)
-            db.log_action("review_skip", card_id=card.id, details={})
-            console.print("[yellow]skipped[/]")
-        elif verb == "suspend":
-            db.update_status(card.id, Status.SUSPENDED)
-            db.log_action("review_suspend", card_id=card.id, details={})
-            console.print("[yellow]suspended[/]")
-        elif verb == "edit":
-            _edit_card(db, card)
+        if card.id in incomplete_ids:
+            card.status = Status.REVIEW
+            console.print(f"[yellow]⚠ {card.word}: enrichment неполный — возвращено в review[/]")
+        else:
+            card.status = Status.APPROVED
+        db.update_card(card)
+        db.log_action("review_finalized", card_id=card.id, details={"status": card.status.value})
 
 
 def _show_card(card: Card, decision: Decision | None) -> None:
