@@ -33,6 +33,8 @@ def _get_note_type_name() -> str:
 
 NOTE_TYPE_NAME_PROP = property(lambda self: _get_note_type_name())  # псевдо-константа
 
+CARD_TEMPLATE_NAME = "Recognition"
+
 
 # ───────────── Схема полей по умолчанию ─────────────
 # Дефолтная схема для языка без своего anki.fields (см. issue #17 — "Reference Card":

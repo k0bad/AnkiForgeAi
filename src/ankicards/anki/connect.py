@@ -5,7 +5,7 @@
 
 Используемые actions:
 - deckNames / createDeck
-- modelNames / createModel
+- modelNames / createModel / updateModelTemplates / updateModelStyling
 - addNote / updateNoteFields / deleteNotes
 - findNotes / notesInfo
 - storeMediaFile  — загрузить mp3/jpg в collection.media
@@ -90,6 +90,27 @@ class AnkiConnect:
             inOrderFields=fields,
             css=css,
             cardTemplates=card_templates,
+        )
+
+    async def update_model_templates(
+        self, model_name: str, templates: dict[str, dict[str, str]]
+    ) -> None:
+        """Обновить Front/Back шаблоны существующего Note Type.
+
+        templates: {"<card_template_name>": {"Front": ..., "Back": ...}}.
+        createModel — разовая операция; чтобы изменения front_template()/back_template()
+        доходили до Anki для уже созданного Note Type, их нужно пушить отдельно.
+        """
+        await self._call(
+            "updateModelTemplates",
+            model={"name": model_name, "templates": templates},
+        )
+
+    async def update_model_styling(self, model_name: str, css: str) -> None:
+        """Обновить CSS существующего Note Type (см. update_model_templates)."""
+        await self._call(
+            "updateModelStyling",
+            model={"name": model_name, "css": css},
         )
 
     # ───────────── Notes ─────────────
