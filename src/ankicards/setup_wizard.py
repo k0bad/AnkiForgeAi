@@ -247,8 +247,7 @@ def run_setup() -> None:
         f"Auto-accept:  {'yes' if auto_accept else 'no'}\n\n"
         "Next steps:\n"
         "  cp .env.example .env    — add your API keys\n"
-        "  python scripts/init_db.py\n"
-        "  python scripts/setup_anki_notetype.py  (with Anki running)",
+        "  ankiforgeai init        — creates the DB and Anki Note Type (start Anki first)",
         border_style="green",
         title="🎉 AnkiForgeAI is ready!",
     ))

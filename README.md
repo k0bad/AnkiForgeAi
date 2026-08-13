@@ -197,7 +197,7 @@ src/ankicards/
 
 languages/                 # Language profiles (YAML + prompts)
 prompts/                   # Default prompts
-scripts/                   # init_db, setup, daily_topic
+scripts/                   # daily_topic, run_images
 tests/
 data/                      # DB, logs (gitignored)
 media/                     # Audio, images (gitignored)
