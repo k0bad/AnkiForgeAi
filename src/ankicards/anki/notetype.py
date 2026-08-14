@@ -117,8 +117,13 @@ CSS = """.card {
     max-width: 600px;
     margin: 0 auto;
     line-height: 1.55;
+    color-scheme: light;
 }
-/* Anki (desktop/AnkiDroid/AnkiMobile) adds .night_mode to an ancestor of .card */
+/* Anki (desktop/AnkiDroid/AnkiMobile) adds .night_mode to an ancestor of .card.
+   color-scheme here opts out of Qt WebEngine's Chromium ForceDarkMode, which Anki
+   enables whenever night mode is on regardless of whether the card already ships
+   its own dark palette — without it, ForceDarkMode re-darkens our already-dark
+   colors on top, washing most of them out. */
 .night_mode .card {
     --bg: #242220;
     --surface: #2C2926;
@@ -126,6 +131,7 @@ CSS = """.card {
     --ink-soft: #B9AF9C;
     --stamp: #C1544F;
     --rule: #443F38;
+    color-scheme: dark;
 }
 @media (max-width: 420px) {
     .card { padding: 16px 20px; font-size: 18px; }
