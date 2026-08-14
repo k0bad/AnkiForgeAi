@@ -174,13 +174,16 @@ hr#answer { border: none; border-top: 2px solid var(--ink); margin: 0 0 18px; }
 
 .section {
     display: grid;
-    grid-template-columns: 90px 1fr;
+    /* 112px fits the widest current label ("PRONUNCIATION"/"ТРАНСКРИПЦИЯ") at
+       12px uppercase monospace without wrapping — see .label. Label font-size
+       doesn't shrink at the 420px breakpoint, so the same width is kept there;
+       below 320px the columns stack instead of narrowing further. */
+    grid-template-columns: 112px 1fr;
     column-gap: 14px;
     row-gap: 4px;
     align-items: baseline;
     margin-bottom: 14px;
 }
-@media (max-width: 420px) { .section { grid-template-columns: 70px 1fr; } }
 @media (max-width: 320px) { .section { grid-template-columns: 1fr; row-gap: 2px; } }
 .label {
     font-family: "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
@@ -188,6 +191,7 @@ hr#answer { border: none; border-top: 2px solid var(--ink); margin: 0 0 18px; }
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--ink-soft);
+    white-space: nowrap;
 }
 .translation { font-size: 22px; font-weight: 600; }
 .forms table { border-collapse: collapse; width: 100%; }
