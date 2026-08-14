@@ -8,6 +8,7 @@
     sync                          Обновить кэш заметок из Anki
     stats                         Статистика по статусам
     init                          Инициализация БД и Note Type в Anki
+                                   (--sync-template — обновить Front/Back/CSS существующего типа)
     doctor                        Проверка согласованности карточек с enrich-конфигом
 """
 
@@ -69,7 +70,13 @@ def setup() -> None:
 
 
 @app.command()
-def init() -> None:
+def init(
+    sync_template: bool = typer.Option(
+        False,
+        "--sync-template",
+        help="Обновить Front/Back/CSS уже существующего Note Type до текущей версии из кода",
+    ),
+) -> None:
     """Создать БД и Note Type в Anki."""
     cfg = get_config()
 
@@ -97,7 +104,15 @@ def init() -> None:
 
         note_type = get_note_type_name()
         if note_type in await anki.model_names():
-            console.print(f"[green]✓[/] Note Type уже существует: {note_type}")
+            if not sync_template:
+                console.print(f"[green]✓[/] Note Type уже существует: {note_type}")
+                return
+            await anki.update_model_templates(
+                model_name=note_type,
+                templates={"Recognition": {"Front": front_template(), "Back": back_template()}},
+            )
+            await anki.update_model_styling(model_name=note_type, css=CSS)
+            console.print(f"[green]✓[/] Note Type обновлён (шаблон + CSS): {note_type}")
             return
 
         await anki.create_model(
