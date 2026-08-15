@@ -65,16 +65,38 @@ async def test_unstructured_response_falls_back_to_plain_translation(
     assert card.image_query is None
 
 
-async def test_cards_with_existing_translation_skip_llm_call(
+async def test_existing_translation_still_backfills_image_query(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def _boom(name: str, **kw: str) -> str:
-        raise AssertionError("load_prompt should not be called when translation is set")
+    """issue #47: ingest topic отдаёт card.translation сразу, без EN-фразы —
+    раньше это значило полный skip, и image_query для таких карточек не
+    заполнялся никогда. Теперь вызов всё равно идёт ради EN:, но не трогает
+    уже готовый translation, даже если LLM в этом вызове вернул другой RU:."""
+    monkeypatch.setattr(translation_module, "load_prompt", lambda name, **kw: "prompt")
 
-    monkeypatch.setattr(translation_module, "load_prompt", _boom)
+    async def _fake_call_text(prompt: str) -> str:
+        return "RU: другой перевод\nEN: house"
+
+    monkeypatch.setattr(translation_module, "call_text", _fake_call_text)
 
     card = _card(translation="дом")
     result = await translation_module.enrich_translation(card)
 
+    assert result.translation == "дом"  # не перезаписан
+    assert result.image_query == "house"
+
+
+async def test_both_already_present_skips_llm_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom(name: str, **kw: str) -> str:
+        raise AssertionError("load_prompt should not be called when nothing is missing")
+
+    monkeypatch.setattr(translation_module, "load_prompt", _boom)
+
+    card = _card(translation="дом")
+    card.image_query = "house"
+    result = await translation_module.enrich_translation(card)
+
     assert result.translation == "дом"
-    assert result.image_query is None
+    assert result.image_query == "house"

@@ -72,6 +72,16 @@ def _card_id(card: Card) -> int:
     return card.id
 
 
+def _needs_translation_stage(card: Card, cfg: Config) -> bool:
+    """translation отсутствует — вызов нужен однозначно. Если translation уже
+    есть (напр. с ingest topic, который сам не спрашивает EN-фразу), вызов всё
+    равно нужен, если карточке вообще будут искать картинку и image_query ещё
+    не заполнен (issue #47) — иначе вызов не нужен вовсе."""
+    if not card.translation:
+        return True
+    return cfg.images.enabled and card.pos.value in cfg.images.only_for_pos and not card.image_query
+
+
 async def _run_enrich_stage(
     stage: str,
     fn: Callable[[list[Card]], Awaitable[list[Card]]],
@@ -144,7 +154,7 @@ async def enrich_and_generate_media(
         try:
             logger.info("stage.start", stage="translation", count=len(cards))
             for card in cards:
-                if not card.translation:
+                if _needs_translation_stage(card, cfg):
                     await enrich_translation(card)
             logger.info("stage.done", stage="translation")
         except Exception as e:
@@ -153,7 +163,7 @@ async def enrich_and_generate_media(
 
         # Per-card translation retry (если не заполнилось)
         for card in cards:
-            if card.translation:
+            if not _needs_translation_stage(card, cfg):
                 continue
             try:
                 await enrich_translation(card)

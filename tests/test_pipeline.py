@@ -231,6 +231,57 @@ async def test_translation_image_query_missing_not_logged_when_images_disabled(
     assert rows == []
 
 
+async def test_topic_ingest_shaped_card_still_gets_image_query_backfilled(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """issue #47: карточка, пришедшая с уже заполненным translation (как из
+    ingest topic) и подходящая под images.only_for_pos, всё равно должна
+    прогнать enrich_translation ради image_query — раньше это молча
+    пропускалось навсегда, и вся цепочка #10/#29/#34/#35 не применялась
+    к основному workflow проекта."""
+    calls: list[Card] = []
+
+    async def _fake_translate(card: Card) -> Card:
+        calls.append(card)
+        card.image_query = "house"
+        return card
+
+    monkeypatch.setattr(pipeline, "enrich_translation", _fake_translate)
+
+    cfg = _make_config(tmp_path, grammar=False, examples=False, pronunciation=False)
+    cfg.images.enabled = True
+    card = _card("hus", translation="дом")  # translation уже есть — как после ingest topic
+
+    await pipeline.run_ingest_pipeline([card], db=db, cfg=cfg, auto_enrich=True, auto_media=False)
+
+    assert calls == [card]
+    assert card.translation == "дом"
+    assert card.image_query == "house"
+
+
+async def test_non_noun_with_existing_translation_skips_translation_stage(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Контраст с тестом выше: карточка не из images.only_for_pos (verb) и с уже
+    заполненным translation не должна вызывать enrich_translation вообще — ей
+    image_query никогда не понадобится, лишний LLM-вызов был бы просто тратой."""
+    calls: list[Card] = []
+
+    async def _fake_translate(card: Card) -> Card:
+        calls.append(card)
+        return card
+
+    monkeypatch.setattr(pipeline, "enrich_translation", _fake_translate)
+
+    cfg = _make_config(tmp_path, grammar=False, examples=False, pronunciation=False)
+    cfg.images.enabled = True
+    card = Card(word="spise", pos=POS.VERB, translation="есть")
+
+    await pipeline.run_ingest_pipeline([card], db=db, cfg=cfg, auto_enrich=True, auto_media=False)
+
+    assert calls == []
+
+
 async def test_enrich_partial_llm_response_routes_only_that_card_to_review(
     tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:

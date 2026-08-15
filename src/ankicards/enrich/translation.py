@@ -31,14 +31,24 @@ def _parse_translation(raw: str) -> tuple[str, str | None]:
 
 
 async def enrich_translation(card: Card) -> Card:
-    """Добавить русский перевод (1-2 варианта) и англ. gloss для поиска картинок."""
-    if card.translation:
+    """Добавить русский перевод (1-2 варианта), если его ещё нет, и англ. gloss
+    для поиска картинок, если его ещё нет.
+
+    Раньше уже заполненный translation означал полный skip — а ingest topic
+    (prompts/topic_words.md) сам не спрашивает EN-фразу, только word/pos/translation,
+    так что image_query для таких карточек не заполнялся никогда (issue #47):
+    вся цепочка фиксов #10/#29/#34/#35 не применялась к основному workflow
+    проекта. Теперь при уже заполненном translation вызов всё равно идёт, если
+    не хватает именно image_query — но сам translation не перезаписывается
+    новым результатом LLM.
+    """
+    if card.translation and card.image_query:
         return card
 
     prompt = load_prompt("translation", word=card.word, pos=card.pos.value)
     raw = await call_text(prompt)
     ru, en = _parse_translation(raw)
-    if ru:
+    if ru and not card.translation:
         card.translation = ru
     if en:
         card.image_query = en
