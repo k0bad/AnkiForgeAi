@@ -175,6 +175,64 @@ async def test_pronunciation_stage_failure_routes_card_to_review_not_approved(
     assert rows[0]["card_id"] == card.id
 
 
+async def test_translation_missing_image_query_logs_warning_but_stays_approved(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Регрессия на #29: если LLM в translation-стадии распарсил RU, но не EN,
+    card.image_query остаётся пустым — это должно залогироваться отдельным
+    warning-событием, но не блокировать карточку (сам перевод корректен)."""
+
+    async def _translate(card: Card) -> Card:
+        card.translation = "дом"
+        return card
+
+    monkeypatch.setattr(pipeline, "enrich_translation", _translate)
+
+    cfg = _make_config(tmp_path, grammar=False, examples=False, pronunciation=False)
+    cfg.images.enabled = True
+    card = _card("hus", translation="")
+    stats = await pipeline.run_ingest_pipeline(
+        [card], db=db, cfg=cfg, auto_enrich=True, auto_media=False
+    )
+
+    assert stats["enrich_incomplete"] == 0
+    approved = db.get_by_status(Status.APPROVED)
+    assert len(approved) == 1
+    assert approved[0].translation == "дом"
+    assert approved[0].image_query is None
+
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT action, card_id FROM audit_log WHERE action = 'translation.image_query_missing'"
+        ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["card_id"] == card.id
+
+
+async def test_translation_image_query_missing_not_logged_when_images_disabled(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Тот же пробел в image_query не должен шуметь в логах, если картинки вообще
+    выключены (images.enabled=False) — поле для такой карточки не используется."""
+
+    async def _translate(card: Card) -> Card:
+        card.translation = "дом"
+        return card
+
+    monkeypatch.setattr(pipeline, "enrich_translation", _translate)
+
+    cfg = _make_config(tmp_path, grammar=False, examples=False, pronunciation=False)
+    assert cfg.images.enabled is False
+    card = _card("hus", translation="")
+    await pipeline.run_ingest_pipeline([card], db=db, cfg=cfg, auto_enrich=True, auto_media=False)
+
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT action FROM audit_log WHERE action = 'translation.image_query_missing'"
+        ).fetchall()
+    assert rows == []
+
+
 async def test_enrich_partial_llm_response_routes_only_that_card_to_review(
     tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:

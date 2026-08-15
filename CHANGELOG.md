@@ -8,6 +8,8 @@ All notable changes to AnkiForgeAI will be documented in this file.
 - `ankiforgeai setup` now syncs `.claude/skills/ankiforgeai/SKILL.md`'s trigger-phrase examples to the chosen `ui_language` (closes #25): `ru` keeps the Russian examples ("сгенерируй слов", ...), `en` switches to English equivalents ("generate words", ...). Only rewrites the trailing example clause of the frontmatter `description` line — idempotent, no-op if SKILL.md isn't present (e.g. pip-installed outside a checkout of this repo).
 
 ### Fixed
+- Pronunciation enrichment failures now route the card to `REVIEW` instead of silently reaching `APPROVED` with no pronunciation (closes #39, found via #28 audit): it shared one try/except with translation, unlike grammar/examples, so a failed batch call never populated `incomplete_ids`. Moved onto the same per-card `_run_enrich_stage` helper.
+- `enrich_translation()` logs a `translation.image_query_missing` warning when the LLM's response parses a Russian translation but not the English image-search gloss (closes #29): previously this failure was invisible — the card reached `APPROVED` normally, and `attach_image()` silently fell back to searching by the target-language word, which providers barely index. Only logged for cards `images.enabled`/`images.only_for_pos` will actually search for.
 - `push`/`sync` now catch `AnkiConnectError` (closes #24): previously an unreachable Anki during `push`/`sync` fell through to a bare traceback on stderr with empty stdout, contradicting SKILL.md's documented `--json` contract that failures always print `✗ <reason>` to stdout.
 - `push` now detects a missing Anki Note Type before attempting to push cards, instead of failing deep inside AnkiConnect calls; added a non-interactive `review` CLI path.
 

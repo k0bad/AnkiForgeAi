@@ -163,6 +163,28 @@ async def enrich_and_generate_media(
                         details={"stage": "translation"},
                     )
 
+        # image_query (англ. gloss для поиска картинок) генерируется тем же LLM-вызовом,
+        # что и translation, но парсится отдельной строкой ("EN:") и может не прийти,
+        # даже когда ru распарсился нормально. card.translation тут не считается
+        # incomplete — перевод корректен, — но без трассы это тихо роняет качество
+        # image-поиска (attach_image() падает обратно на card.word, см. issue #10),
+        # и ничего не сигналит об этом (issue #29). Актуально только для карточек,
+        # которым вообще будут искать картинку.
+        if cfg.images.enabled:
+            for card in cards:
+                if (
+                    card.translation
+                    and not card.image_query
+                    and card.pos.value in cfg.images.only_for_pos
+                ):
+                    _record(
+                        db,
+                        "warning",
+                        "translation.image_query_missing",
+                        card.id,
+                        word=card.word,
+                    )
+
         # Grammar и examples — обработаны через _run_enrich_stage с per-card ошибками
         if cfg.enrich.grammar:
             await _run_enrich_stage(
