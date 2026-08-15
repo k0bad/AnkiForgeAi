@@ -1,10 +1,9 @@
 """Интерактивный ревью pending-карточек в терминале.
 
 Использует rich для таблиц и questionary для prompts.
-Для каждой карточки показывает:
-- основные поля
-- найденные дубликаты с score
-- варианты картинок (если ingest=topic и pos=noun)
+Для каждой карточки показывает основные поля и найденные дубликаты с score.
+После accept, по итогам batch enrichment у принятых карточек — кандидатов на
+картинку (если включено и pos подходит), человек выбирает нужную или пропускает.
 
 Действия: accept / merge / edit / skip / suspend / quit
 """
@@ -21,6 +20,7 @@ from rich.table import Table
 
 from ..config import Config
 from ..db import Database
+from ..media.images import find_candidates, save_image
 from ..models import Card, Decision, Status
 from ..pipeline import _record
 from . import actions
@@ -90,18 +90,64 @@ async def _finalize_accepted(cards: list[Card], db: Database, cfg: Config) -> No
     """Прогнать enrich + media для карточек, принятых за сессию ревью, и сохранить
     результат (accept-ветка выше только собирает карточки в список, статус в
     SQLite ещё не меняет — старый status=review/pending остаётся, пока не
-    отработает actions.accept_cards)."""
+    отработает actions.accept_cards).
+
+    Картинки автовыбором не трогаются здесь (auto_pick_images=False) — после
+    enrichment у карточки уже есть image_query, и человек сам выбирает из
+    кандидатов через _pick_image (issue #36), вместо молчаливой подстановки
+    первого результата поиска.
+    """
     ids: list[int] = []
     for card in cards:
         assert card.id is not None  # уже в БД, id всегда назначен
         ids.append(card.id)
 
-    results = await actions.accept_cards(ids, db, cfg)
+    results = await actions.accept_cards(ids, db, cfg, auto_pick_images=False)
     for card in cards:
         assert card.id is not None
-        card.status = Status(results[card.id])
+        card_id = card.id
+        card.status = Status(results[card_id])
         if card.status == Status.REVIEW:
             console.print(f"[yellow]⚠ {card.word}: enrichment неполный — возвращено в review[/]")
+
+        fresh = db.get_by_id(card_id)  # свежие поля (image_query и т.д.) после enrichment
+        assert fresh is not None
+        await _pick_image(fresh, cfg, db)
+
+
+async def _pick_image(card: Card, cfg: Config, db: Database) -> None:
+    """Найти кандидатов на картинку и дать человеку выбрать/пропустить (issue #36) —
+    раньше единственный результат подставлялся автоматически, без права увидеть
+    альтернативы. Молча выходит, если картинки выключены/не для этой части речи/
+    поиск ничего не дал (find_candidates уже залогировал пустой поиск сам)."""
+    candidates = await find_candidates(card, cfg)
+    if not candidates:
+        return
+
+    _show_image_candidates(card, candidates)
+    choice = questionary.select(
+        "Картинка:",
+        choices=[str(i) for i in range(1, len(candidates) + 1)] + ["skip — без картинки"],
+        default="1",
+    ).ask()
+    if choice is None or choice.startswith("skip"):
+        return
+
+    assert card.id is not None  # уже в БД (fresh из db.get_by_id)
+    index = int(choice) - 1
+    await save_image(card, candidates[index], cfg)
+    db.update_card(card)
+    _record(db, "info", "image_picked", card.id, index=index, url=candidates[index]["url"])
+
+
+def _show_image_candidates(card: Card, candidates: list[dict[str, str]]) -> None:
+    table = Table(title=f"Картинки для «{card.word}»", show_header=True)
+    table.add_column("#", justify="right")
+    table.add_column("автор")
+    table.add_column("ссылка")
+    for i, c in enumerate(candidates, start=1):
+        table.add_row(str(i), c.get("author") or "-", c.get("html") or c.get("url") or "-")
+    console.print(table)
 
 
 def _show_card(card: Card, decision: Decision | None) -> None:

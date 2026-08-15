@@ -11,6 +11,21 @@ from pathlib import Path
 
 import pytest
 
+from ankicards import pipeline
+from ankicards.config import (
+    AnkiConfig,
+    Config,
+    DedupeConfig,
+    EnrichConfig,
+    ImagesConfig,
+    IngestConfig,
+    LLMConfig,
+    LoggingConfig,
+    PathsConfig,
+    ReviewConfig,
+    TagsConfig,
+    TTSConfig,
+)
 from ankicards.db import Database
 from ankicards.models import POS, Card, Status
 from ankicards.review import actions
@@ -18,6 +33,29 @@ from ankicards.review import actions
 
 def _card(word: str, status: Status = Status.REVIEW) -> Card:
     return Card(word=word, pos=POS.NOUN, translation="дом", status=status)
+
+
+def _make_config(tmp_path: Path) -> Config:
+    return Config(
+        language="nb",
+        paths=PathsConfig(
+            db=tmp_path / "test.db",
+            logs_dir=tmp_path / "logs",
+            audio_dir=tmp_path / "audio",
+            images_dir=tmp_path / "images",
+            prompts_dir=tmp_path / "prompts",
+        ),
+        anki=AnkiConfig(),
+        dedupe=DedupeConfig(),
+        ingest=IngestConfig(),
+        llm=LLMConfig(),
+        tts=TTSConfig(),
+        images=ImagesConfig(enabled=True),
+        review=ReviewConfig(),
+        enrich=EnrichConfig(grammar=False, examples=False, pronunciation=False),
+        logging=LoggingConfig(),
+        tags=TagsConfig(),
+    )
 
 
 @pytest.fixture
@@ -143,3 +181,36 @@ async def test_delete_cards_frees_id_for_next_insert(db: Database) -> None:
 async def test_delete_cards_raises_for_unknown_id(db: Database) -> None:
     with pytest.raises(ValueError, match="не найдены"):
         await actions.delete_cards([999], db, _FakeAnki())  # type: ignore[arg-type]
+
+
+async def test_accept_cards_auto_pick_images_false_does_not_attach_image(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """issue #36: с auto_pick_images=False review_pending подбирает картинку сам
+    после accept_cards — сама accept_cards не должна трогать attach_image вообще
+    (ни поиска, ни автовыбора первого результата)."""
+    called = False
+
+    async def _spy_attach(card: Card, cfg: Config, auto_pick: bool = False) -> Card:
+        nonlocal called
+        called = True
+        card.image = "should-not-happen.jpg"
+        return card
+
+    async def _noop_audio(card: Card, cfg: Config) -> Card:
+        return card
+
+    monkeypatch.setattr(pipeline, "attach_image", _spy_attach)
+    monkeypatch.setattr(pipeline, "generate_audio", _noop_audio)
+
+    cfg = _make_config(tmp_path)
+    card = _card("hus")
+    db.insert_card(card)
+
+    results = await actions.accept_cards([card.id], db, cfg, auto_pick_images=False)
+
+    assert called is False
+    assert results[card.id] == Status.APPROVED.value
+    saved = db.get_by_id(card.id)
+    assert saved is not None
+    assert saved.image is None

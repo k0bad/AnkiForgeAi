@@ -71,6 +71,7 @@ async def test_finalize_accepted_marks_approved_and_persists_enrichment(
         cfg_: Config,
         auto_enrich: bool = True,
         auto_media: bool = True,
+        auto_pick_images: bool = True,
     ) -> tuple[dict, set[str]]:
         for c in cards:
             c.example = "Jeg har et hus."
@@ -100,6 +101,7 @@ async def test_finalize_accepted_returns_incomplete_cards_to_review(
         cfg_: Config,
         auto_enrich: bool = True,
         auto_media: bool = True,
+        auto_pick_images: bool = True,
     ) -> tuple[dict, set[str]]:
         return {}, {card.id}
 
@@ -148,6 +150,7 @@ def test_review_pending_accept_then_quit_still_finalizes_accepted_card(
         cfg_: Config,
         auto_enrich: bool = True,
         auto_media: bool = True,
+        auto_pick_images: bool = True,
     ) -> tuple[dict, set[str]]:
         for c in cards:
             c.example = "Jeg har et hus."
@@ -165,3 +168,96 @@ def test_review_pending_accept_then_quit_still_finalizes_accepted_card(
     saved_untouched = db.get_by_id(untouched_card.id)
     assert saved_untouched is not None
     assert saved_untouched.status == Status.REVIEW
+
+
+async def test_finalize_accepted_lets_user_pick_image_candidate(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _make_config(tmp_path)
+    cfg.images.enabled = True
+    card = _card("hus")
+    db.insert_card(card)
+
+    async def _fake_enrich(
+        cards: list[Card],
+        db_: Database,
+        cfg_: Config,
+        auto_enrich: bool = True,
+        auto_media: bool = True,
+        auto_pick_images: bool = True,
+    ) -> tuple[dict, set[str]]:
+        return {}, set()
+
+    monkeypatch.setattr(review_module.actions, "enrich_and_generate_media", _fake_enrich)
+
+    candidates = [
+        {"url": "https://img/1.jpg", "author": "Anna", "html": "https://x/1"},
+        {"url": "https://img/2.jpg", "author": "Bob", "html": "https://x/2"},
+    ]
+
+    async def _fake_find(card_: Card, cfg_: Config) -> list[dict[str, str]]:
+        return candidates
+
+    saved_results: list[dict[str, str]] = []
+
+    async def _fake_save(card_: Card, result: dict[str, str], cfg_: Config) -> Card:
+        saved_results.append(result)
+        card_.image = "chosen.jpg"
+        return card_
+
+    monkeypatch.setattr(review_module, "find_candidates", _fake_find)
+    monkeypatch.setattr(review_module, "save_image", _fake_save)
+    # Второй кандидат (индекс 1), а не первый — иначе неотличимо от старого auto-pick.
+    monkeypatch.setattr(review_module.questionary, "select", lambda *a, **kw: _FakeQuestion("2"))
+
+    await review_module._finalize_accepted([card], db, cfg)
+
+    assert saved_results == [candidates[1]]
+    saved_card = db.get_by_id(card.id)
+    assert saved_card is not None
+    assert saved_card.image == "chosen.jpg"
+
+
+async def test_finalize_accepted_skip_choice_leaves_card_without_image(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _make_config(tmp_path)
+    cfg.images.enabled = True
+    card = _card("hus")
+    db.insert_card(card)
+
+    async def _fake_enrich(
+        cards: list[Card],
+        db_: Database,
+        cfg_: Config,
+        auto_enrich: bool = True,
+        auto_media: bool = True,
+        auto_pick_images: bool = True,
+    ) -> tuple[dict, set[str]]:
+        return {}, set()
+
+    monkeypatch.setattr(review_module.actions, "enrich_and_generate_media", _fake_enrich)
+
+    async def _fake_find(card_: Card, cfg_: Config) -> list[dict[str, str]]:
+        return [{"url": "https://img/1.jpg", "author": "Anna", "html": "https://x/1"}]
+
+    save_calls: list[Card] = []
+
+    async def _fake_save(card_: Card, result: dict[str, str], cfg_: Config) -> Card:
+        save_calls.append(card_)
+        return card_
+
+    monkeypatch.setattr(review_module, "find_candidates", _fake_find)
+    monkeypatch.setattr(review_module, "save_image", _fake_save)
+    monkeypatch.setattr(
+        review_module.questionary,
+        "select",
+        lambda *a, **kw: _FakeQuestion("skip — без картинки"),
+    )
+
+    await review_module._finalize_accepted([card], db, cfg)
+
+    assert save_calls == []
+    saved_card = db.get_by_id(card.id)
+    assert saved_card is not None
+    assert saved_card.image is None

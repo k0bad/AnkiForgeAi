@@ -111,6 +111,7 @@ async def enrich_and_generate_media(
     cfg: Config,
     auto_enrich: bool = True,
     auto_media: bool = True,
+    auto_pick_images: bool = True,
 ) -> tuple[dict, set[int]]:
     """Прогнать enrich- и media-стадии для карточек, уже прошедших dedupe.
 
@@ -119,6 +120,11 @@ async def enrich_and_generate_media(
     ничего не enrich'я (issue #11). Возвращает (stats, incomplete_ids);
     incomplete_ids — id карточек, где часть enrichment не удалась: вызывающий
     код должен вернуть такие карточки в review, а не помечать approved.
+
+    auto_pick_images=False (issue #36) полностью пропускает картиночную стадию
+    здесь — вызывающий код (review_pending) сам находит кандидатов и даёт
+    человеку выбрать, вместо повторного (и лишнего для лимитов провайдеров)
+    поискового запроса после автовыбора первого результата.
     """
     stats: dict = {"enriched": 0, "enrich_incomplete": 0, "audio": 0, "errors": 0}
     incomplete_ids: set[int] = set()
@@ -232,7 +238,7 @@ async def enrich_and_generate_media(
                 stats["errors"] += 1
                 _record(db, "warning", "audio_failed", card.id, error=str(e))
         # Картинки для существительных (если включено в конфиге)
-        if cfg.images.enabled:
+        if cfg.images.enabled and auto_pick_images:
             for card in cards:
                 try:
                     await attach_image(card, cfg, auto_pick=True)
