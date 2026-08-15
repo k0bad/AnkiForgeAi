@@ -26,7 +26,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .anki.connect import AnkiConnect
+from .anki.connect import AnkiConnect, AnkiConnectError
 from .anki.notetype import (
     CARD_TEMPLATE_NAME,
     CSS,
@@ -343,7 +343,7 @@ def push(as_json: bool = typer.Option(False, "--json", help="Машиночит�
     with bound_run("push"):
         try:
             count = asyncio.run(_run())
-        except NoteTypeMissingError as e:
+        except (NoteTypeMissingError, AnkiConnectError) as e:
             console.print(f"[red]✗[/] {e}")
             raise typer.Exit(code=1) from e
 
@@ -364,7 +364,11 @@ def sync(as_json: bool = typer.Option(False, "--json", help="Машиночит�
         return await sync_anki_to_cache(db, anki, cfg)
 
     with bound_run("sync"):
-        count = asyncio.run(_run())
+        try:
+            count = asyncio.run(_run())
+        except AnkiConnectError as e:
+            console.print(f"[red]✗[/] {e}")
+            raise typer.Exit(code=1) from e
 
     if as_json:
         print(json.dumps({"synced": count}, ensure_ascii=False))
