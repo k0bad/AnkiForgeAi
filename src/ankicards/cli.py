@@ -43,11 +43,13 @@ from .db import Database
 from .doctor import find_inconsistencies
 from .ingest.topic import ingest_by_topic
 from .ingest.url import ingest_from_url
-from .log import bound_run
+from .log import bound_run, get_logger
 from .models import Status
 from .pipeline import NoteTypeMissingError, push_approved, run_ingest_pipeline
 from .review import actions as review_actions
 from .review.interactive import review_pending
+
+logger = get_logger(__name__)
 
 
 def _force_utf8_stdio() -> None:
@@ -100,6 +102,7 @@ def init() -> None:
         try:
             await anki.ensure_deck()
         except Exception as e:
+            logger.warning("anki.unreachable", error=str(e))
             console.print(
                 f"[yellow]![/] Anki недоступен, Note Type не создан: {e}\n"
                 "    Запусти `ankiforgeai init` ещё раз, когда Anki будет открыт "
@@ -117,16 +120,20 @@ def init() -> None:
             await anki.update_model_templates(
                 note_type, {CARD_TEMPLATE_NAME: {"Front": front, "Back": back}}
             )
+            logger.info("notetype.templates_synced", note_type=note_type)
             await anki.update_model_styling(note_type, CSS)
+            logger.info("notetype.styling_synced", note_type=note_type)
             console.print(f"[green]✓[/] Note Type обновлён (дизайн синхронизирован): {note_type}")
             return
 
+        fields = field_names()
         await anki.create_model(
             model_name=note_type,
-            fields=field_names(),
+            fields=fields,
             css=CSS,
             card_templates=[{"Name": CARD_TEMPLATE_NAME, "Front": front, "Back": back}],
         )
+        logger.info("notetype.created", note_type=note_type, field_count=len(fields))
         console.print(f"[green]✓[/] Note Type создан: {note_type}")
 
     with bound_run("init"):
