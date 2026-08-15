@@ -11,6 +11,7 @@ Guides user through:
 from __future__ import annotations
 
 import shutil
+from pathlib import Path
 from typing import cast
 
 import questionary
@@ -18,12 +19,55 @@ import yaml
 from rich.console import Console
 from rich.panel import Panel
 
-from .config import DEFAULT_CONFIG_PATH, languages_dir
+from .config import DEFAULT_CONFIG_PATH, PROJECT_ROOT, languages_dir
 
 LANGUAGES_DIR = languages_dir()
 CONFIG_PATH = DEFAULT_CONFIG_PATH
+SKILL_MD_PATH = PROJECT_ROOT / ".claude" / "skills" / "ankiforgeai" / "SKILL.md"
+
+# Trigger-phrase examples appended to SKILL.md's frontmatter `description`, keyed
+# by ui_language — what the user actually types in chat, not the target language.
+_SKILL_TRIGGER_EXAMPLES = {
+    "ru": (
+        'including Russian requests like "сгенерируй слов", "покажи что на ревью", '
+        '"запушь в анки", "прими карточку X".'
+    ),
+    "en": (
+        'including requests like "generate words", "show what\'s in review", '
+        '"push to anki", "accept card X".'
+    ),
+}
 
 console = Console()
+
+
+def _sync_skill_trigger_phrases(ui_lang: str, skill_path: Path = SKILL_MD_PATH) -> bool:
+    """Sync SKILL.md's description trigger-phrase examples to `ui_lang`.
+
+    No-op if SKILL.md isn't present (e.g. pip-installed outside a checkout of
+    this repo). Only rewrites the trailing example clause of the frontmatter
+    `description` line, leaving the rest of the file untouched. Returns
+    whether the file was changed.
+    """
+    if not skill_path.exists():
+        return False
+
+    examples = _SKILL_TRIGGER_EXAMPLES.get(ui_lang, _SKILL_TRIGGER_EXAMPLES["en"])
+    lines = skill_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if not line.startswith("description: "):
+            continue
+        prefix, sep, _ = line.partition(" — including")
+        if not sep:
+            return False
+        newline = "\n" if line.endswith("\n") else ""
+        new_line = f"{prefix} — {examples}{newline}"
+        if new_line == line:
+            return False
+        lines[i] = new_line
+        skill_path.write_text("".join(lines), encoding="utf-8")
+        return True
+    return False
 
 
 def _discover_languages() -> list[str]:
@@ -233,6 +277,9 @@ def run_setup() -> None:
 
     with CONFIG_PATH.open("w", encoding="utf-8") as f:
         yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+    if _sync_skill_trigger_phrases(ui_lang):
+        console.print(f"[green]✓[/] Synced skill trigger phrases ({ui_lang})")
 
     # ─── 7. Summary ───
     console.print()

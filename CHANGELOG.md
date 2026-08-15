@@ -4,6 +4,13 @@ All notable changes to AnkiForgeAI will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `ankiforgeai setup` now syncs `.claude/skills/ankiforgeai/SKILL.md`'s trigger-phrase examples to the chosen `ui_language` (closes #25): `ru` keeps the Russian examples ("сгенерируй слов", ...), `en` switches to English equivalents ("generate words", ...). Only rewrites the trailing example clause of the frontmatter `description` line — idempotent, no-op if SKILL.md isn't present (e.g. pip-installed outside a checkout of this repo).
+
+### Fixed
+- `push`/`sync` now catch `AnkiConnectError` (closes #24): previously an unreachable Anki during `push`/`sync` fell through to a bare traceback on stderr with empty stdout, contradicting SKILL.md's documented `--json` contract that failures always print `✗ <reason>` to stdout.
+- `push` now detects a missing Anki Note Type before attempting to push cards, instead of failing deep inside AnkiConnect calls; added a non-interactive `review` CLI path.
+
 ## [0.3.0] — 2026-08-13
 
 ### Added
