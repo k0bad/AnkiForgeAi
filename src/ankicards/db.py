@@ -21,9 +21,15 @@ import structlog
 
 from .models import Card, Status
 
+
+class IdMigrationRequiredError(RuntimeError):
+    """cards.id всё ещё TEXT (старые UUID) — нужно запустить `ankiforgeai migrate-ids`
+    перед тем, как эта версия сможет работать с базой (см. migrate_ids.py)."""
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS cards (
-    id                  TEXT PRIMARY KEY,
+    id                  INTEGER PRIMARY KEY,
     word                TEXT NOT NULL,
     pronunciation       TEXT,
     translation         TEXT NOT NULL,
@@ -50,7 +56,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp   TEXT NOT NULL,
     action      TEXT NOT NULL,          -- create / merge / skip / push / sync / ...
-    card_id     TEXT,
+    card_id     INTEGER,
     details     TEXT,                   -- JSON
     run_id      TEXT                    -- одна CLI-команда = один run_id (см. log.bound_run)
 );
@@ -83,13 +89,21 @@ class Database:
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
         """Догнать схему существующих БД, созданных до текущей версии SCHEMA."""
+        card_info = {row["name"]: row for row in conn.execute("PRAGMA table_info(cards)")}
+        id_col = card_info.get("id")
+        if id_col is not None and str(id_col["type"]).upper() == "TEXT":
+            raise IdMigrationRequiredError(
+                "cards.id ещё TEXT (старые UUID-идентификаторы) — запусти "
+                "`ankiforgeai migrate-ids`, чтобы перенумеровать карточки в "
+                "последовательные целые числа, и повтори команду."
+            )
+
         cols = {row["name"] for row in conn.execute("PRAGMA table_info(audit_log)")}
         if "run_id" not in cols:
             conn.execute("ALTER TABLE audit_log ADD COLUMN run_id TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_run ON audit_log(run_id)")
 
-        card_cols = {row["name"] for row in conn.execute("PRAGMA table_info(cards)")}
-        if "image_query" not in card_cols:
+        if "image_query" not in card_info:
             conn.execute("ALTER TABLE cards ADD COLUMN image_query TEXT")
 
     @contextmanager
@@ -109,9 +123,20 @@ class Database:
 
     # ───────────── Cards ─────────────
 
+    def _next_free_id(self, conn: sqlite3.Connection) -> int:
+        """Наименьший свободный положительный int — переиспользует "дыры",
+        оставшиеся после delete_card(), вместо бесконечного роста номера."""
+        row = conn.execute(
+            """SELECT MIN(t.id) + 1 AS next_free
+               FROM (SELECT 0 AS id UNION SELECT id FROM cards) t
+               WHERE NOT EXISTS (SELECT 1 FROM cards t2 WHERE t2.id = t.id + 1)"""
+        ).fetchone()
+        return int(row["next_free"])
+
     def insert_card(self, card: Card) -> None:
-        """Вставить новую карточку."""
+        """Вставить новую карточку, выделив ей наименьший свободный номер (мутирует card.id)."""
         with self.connect() as conn:
+            card.id = self._next_free_id(conn)
             conn.execute(
                 """INSERT INTO cards (
                     id, word, pronunciation, translation, image_query, example,
@@ -140,7 +165,7 @@ class Database:
                 ),
             )
 
-    def update_status(self, card_id: str, status: Status) -> None:
+    def update_status(self, card_id: int, status: Status) -> None:
         with self.connect() as conn:
             conn.execute(
                 "UPDATE cards SET status = ? WHERE id = ?",
@@ -181,20 +206,49 @@ class Database:
             ).fetchall()
         return [_row_to_card(r) for r in rows]
 
-    def get_by_id(self, card_id: str) -> Card | None:
+    def get_by_id(self, card_id: int) -> Card | None:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM cards WHERE id = ?", (card_id,)).fetchone()
         return _row_to_card(row) if row else None
 
+    def get_by_anki_note_id(self, note_id: int) -> Card | None:
+        """Найти карточку по anki_note_id — используется sync.py, чтобы понять,
+        какая (если вообще) наша карточка стоит за исчезнувшей заметкой Anki."""
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM cards WHERE anki_note_id = ?", (note_id,)).fetchone()
+        return _row_to_card(row) if row else None
+
+    def count_cards_with_anki_note_id(self) -> int:
+        """Сколько карточек вообще привязаны к заметке в Anki — знаменатель для
+        guard'а против массового ложного удаления в sync.py (см. _handle_vanished_notes)."""
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM cards WHERE anki_note_id IS NOT NULL"
+            ).fetchone()
+        return int(row["n"])
+
+    def delete_card(self, card_id: int) -> None:
+        """Удалить карточку насовсем — освобождает её номер для переиспользования
+        (см. review/actions.py::delete_cards и anki/sync.py — вызывается либо по
+        явной команде `ankiforgeai delete`, либо когда sync обнаружит, что
+        соответствующая заметка исчезла из Anki)."""
+        with self.connect() as conn:
+            conn.execute("DELETE FROM cards WHERE id = ?", (card_id,))
+
     def all_words(self) -> list[tuple[str, str]]:
-        """Список (id, word) всех карточек — для быстрой дедупликации."""
+        """Список (id, word) всех карточек — для быстрой дедупликации.
+
+        id приводится к str() здесь же: dedupe.py уже работает со строковыми id
+        вперемешку с note_id из Anki (другое пространство id, тоже str) — так
+        переход card.id на int не требует никаких изменений в dedupe.py.
+        """
         with self.connect() as conn:
             rows = conn.execute("SELECT id, word FROM cards").fetchall()
-        return [(r["id"], r["word"]) for r in rows]
+        return [(str(r["id"]), r["word"]) for r in rows]
 
     # ───────────── Audit ─────────────
 
-    def log_action(self, action: str, card_id: str | None, details: dict) -> None:
+    def log_action(self, action: str, card_id: int | None, details: dict) -> None:
         run_id = structlog.contextvars.get_contextvars().get("run_id")
         with self.connect() as conn:
             conn.execute(
@@ -235,6 +289,16 @@ class Database:
         with self.connect() as conn:
             rows = conn.execute("SELECT note_id, word FROM anki_cache").fetchall()
         return [(r["note_id"], r["word"]) for r in rows]
+
+    def purge_anki_cache(self, note_ids: list[int]) -> None:
+        """Убрать из кэша заметки, которых больше нет в Anki (см. anki/sync.py —
+        upsert_anki_note никогда не чистит записи для исчезнувших заметок сам)."""
+        if not note_ids:
+            return
+        with self.connect() as conn:
+            conn.executemany(
+                "DELETE FROM anki_cache WHERE note_id = ?", [(nid,) for nid in note_ids]
+            )
 
 
 def _row_to_card(row: sqlite3.Row) -> Card:

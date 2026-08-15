@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from ankicards.anki.sync import sync_anki_to_cache
 from ankicards.config import (
     AnkiConfig,
@@ -53,7 +55,13 @@ def _make_config(
     )
 
 
+@pytest.fixture
+def db(tmp_path: Path) -> Database:
+    return Database(tmp_path / "cards.db")
+
+
 def _card(
+    db: Database,
     word: str = "hus",
     pos: POS = POS.NOUN,
     status: Status = Status.APPROVED,
@@ -61,13 +69,15 @@ def _card(
     **overrides: object,
 ) -> Card:
     # image заполнен по умолчанию, чтобы не задевать images-проверку в тестах других check'ов
-    return Card(word=word, pos=pos, translation="дом", status=status, image=image, **overrides)
+    card = Card(word=word, pos=pos, translation="дом", status=status, image=image, **overrides)
+    db.insert_card(card)  # find_inconsistencies работает с уже сохранёнными карточками (id: int)
+    return card
 
 
-def test_missing_forms_flagged_when_grammar_enabled(tmp_path: Path) -> None:
+def test_missing_forms_flagged_when_grammar_enabled(tmp_path: Path, db: Database) -> None:
     enrich = EnrichConfig(grammar=True, examples=False, pronunciation=False)
     cfg = _make_config(tmp_path, enrich=enrich)
-    card = _card(forms=None)
+    card = _card(db, forms=None)
 
     problems = find_inconsistencies([card], cfg)
 
@@ -76,28 +86,28 @@ def test_missing_forms_flagged_when_grammar_enabled(tmp_path: Path) -> None:
     assert problems[0].card_id == card.id
 
 
-def test_populated_forms_not_flagged(tmp_path: Path) -> None:
+def test_populated_forms_not_flagged(tmp_path: Path, db: Database) -> None:
     enrich = EnrichConfig(grammar=True, examples=False, pronunciation=False)
     cfg = _make_config(tmp_path, enrich=enrich)
-    card = _card(forms={"gender": "m"})
+    card = _card(db, forms={"gender": "m"})
 
     assert find_inconsistencies([card], cfg) == []
 
 
-def test_missing_forms_not_flagged_for_non_inflected_pos(tmp_path: Path) -> None:
+def test_missing_forms_not_flagged_for_non_inflected_pos(tmp_path: Path, db: Database) -> None:
     """enrich/grammar.py заполняет forms только для noun/verb/adj — для остальных
     частей речи forms=None корректно, даже когда enrich.grammar=true."""
     enrich = EnrichConfig(grammar=True, examples=False, pronunciation=False)
     cfg = _make_config(tmp_path, enrich=enrich)
-    card = _card(pos=POS.ADVERB, forms=None)
+    card = _card(db, pos=POS.ADVERB, forms=None)
 
     assert find_inconsistencies([card], cfg) == []
 
 
-def test_missing_example_flagged_when_examples_enabled(tmp_path: Path) -> None:
+def test_missing_example_flagged_when_examples_enabled(tmp_path: Path, db: Database) -> None:
     enrich = EnrichConfig(grammar=False, examples=True, pronunciation=False)
     cfg = _make_config(tmp_path, enrich=enrich)
-    card = _card(example=None)
+    card = _card(db, example=None)
 
     problems = find_inconsistencies([card], cfg)
 
@@ -105,10 +115,12 @@ def test_missing_example_flagged_when_examples_enabled(tmp_path: Path) -> None:
     assert problems[0].check == "enrich.examples"
 
 
-def test_missing_pronunciation_flagged_when_pronunciation_enabled(tmp_path: Path) -> None:
+def test_missing_pronunciation_flagged_when_pronunciation_enabled(
+    tmp_path: Path, db: Database
+) -> None:
     enrich = EnrichConfig(grammar=False, examples=False, pronunciation=True)
     cfg = _make_config(tmp_path, enrich=enrich)
-    card = _card(pronunciation=None)
+    card = _card(db, pronunciation=None)
 
     problems = find_inconsistencies([card], cfg)
 
@@ -116,17 +128,17 @@ def test_missing_pronunciation_flagged_when_pronunciation_enabled(tmp_path: Path
     assert problems[0].check == "enrich.pronunciation"
 
 
-def test_disabled_toggles_do_not_flag_empty_fields(tmp_path: Path) -> None:
+def test_disabled_toggles_do_not_flag_empty_fields(tmp_path: Path, db: Database) -> None:
     cfg = _make_config(tmp_path, enrich=_ALL_ENRICH_OFF)
-    card = _card(forms=None, example=None, pronunciation=None)
+    card = _card(db, forms=None, example=None, pronunciation=None)
 
     assert find_inconsistencies([card], cfg) == []
 
 
-def test_missing_image_flagged_for_pos_in_only_for_pos(tmp_path: Path) -> None:
+def test_missing_image_flagged_for_pos_in_only_for_pos(tmp_path: Path, db: Database) -> None:
     images = ImagesConfig(enabled=True, only_for_pos=["noun"])
     cfg = _make_config(tmp_path, enrich=_ALL_ENRICH_OFF, images=images)
-    card = _card(pos=POS.NOUN, image=None)
+    card = _card(db, pos=POS.NOUN, image=None)
 
     problems = find_inconsistencies([card], cfg)
 
@@ -134,25 +146,27 @@ def test_missing_image_flagged_for_pos_in_only_for_pos(tmp_path: Path) -> None:
     assert problems[0].check == "images.enabled"
 
 
-def test_missing_image_not_flagged_for_pos_outside_only_for_pos(tmp_path: Path) -> None:
+def test_missing_image_not_flagged_for_pos_outside_only_for_pos(
+    tmp_path: Path, db: Database
+) -> None:
     images = ImagesConfig(enabled=True, only_for_pos=["noun"])
     cfg = _make_config(tmp_path, enrich=_ALL_ENRICH_OFF, images=images)
-    card = _card(pos=POS.VERB, image=None)
+    card = _card(db, pos=POS.VERB, image=None)
 
     assert find_inconsistencies([card], cfg) == []
 
 
-def test_missing_image_not_flagged_when_images_disabled(tmp_path: Path) -> None:
+def test_missing_image_not_flagged_when_images_disabled(tmp_path: Path, db: Database) -> None:
     images = ImagesConfig(enabled=False, only_for_pos=["noun"])
     cfg = _make_config(tmp_path, enrich=_ALL_ENRICH_OFF, images=images)
-    card = _card(pos=POS.NOUN, image=None)
+    card = _card(db, pos=POS.NOUN, image=None)
 
     assert find_inconsistencies([card], cfg) == []
 
 
-def test_pushed_card_missing_anki_note_id_flagged(tmp_path: Path) -> None:
+def test_pushed_card_missing_anki_note_id_flagged(tmp_path: Path, db: Database) -> None:
     cfg = _make_config(tmp_path, enrich=_ALL_ENRICH_OFF)
-    card = _card(status=Status.PUSHED, anki_note_id=None)
+    card = _card(db, status=Status.PUSHED, anki_note_id=None)
 
     problems = find_inconsistencies([card], cfg)
 
@@ -160,29 +174,29 @@ def test_pushed_card_missing_anki_note_id_flagged(tmp_path: Path) -> None:
     assert problems[0].check == "anki_note_id"
 
 
-def test_pushed_card_with_anki_note_id_not_flagged(tmp_path: Path) -> None:
+def test_pushed_card_with_anki_note_id_not_flagged(tmp_path: Path, db: Database) -> None:
     cfg = _make_config(tmp_path, enrich=_ALL_ENRICH_OFF)
-    card = _card(status=Status.PUSHED, anki_note_id=12345)
+    card = _card(db, status=Status.PUSHED, anki_note_id=12345)
 
     assert find_inconsistencies([card], cfg) == []
 
 
-def test_pending_and_review_cards_are_skipped_entirely(tmp_path: Path) -> None:
+def test_pending_and_review_cards_are_skipped_entirely(tmp_path: Path, db: Database) -> None:
     """Карточки, ещё не прошедшие pipeline целиком — пустые поля там не баг."""
     cfg = _make_config(tmp_path)  # дефолт: все enrich- и images-тумблеры включены
     cards = [
-        _card(status=Status.PENDING, forms=None, example=None, pronunciation=None, image=None),
-        _card(status=Status.REVIEW, forms=None, example=None, pronunciation=None, image=None),
+        _card(db, status=Status.PENDING, forms=None, example=None, pronunciation=None, image=None),
+        _card(db, status=Status.REVIEW, forms=None, example=None, pronunciation=None, image=None),
     ]
 
     assert find_inconsistencies(cards, cfg) == []
 
 
-def test_multiple_problems_on_one_card_all_reported(tmp_path: Path) -> None:
+def test_multiple_problems_on_one_card_all_reported(tmp_path: Path, db: Database) -> None:
     enrich = EnrichConfig(grammar=True, examples=True, pronunciation=True)
     images = ImagesConfig(enabled=True, only_for_pos=["noun"])
     cfg = _make_config(tmp_path, enrich=enrich, images=images)
-    card = _card(pos=POS.NOUN, forms=None, example=None, pronunciation=None, image=None)
+    card = _card(db, pos=POS.NOUN, forms=None, example=None, pronunciation=None, image=None)
 
     problems = find_inconsistencies([card], cfg)
 
@@ -190,11 +204,12 @@ def test_multiple_problems_on_one_card_all_reported(tmp_path: Path) -> None:
     assert checks == {"enrich.grammar", "enrich.examples", "enrich.pronunciation", "images.enabled"}
 
 
-def test_fully_enriched_card_has_no_problems(tmp_path: Path) -> None:
+def test_fully_enriched_card_has_no_problems(tmp_path: Path, db: Database) -> None:
     enrich = EnrichConfig(grammar=True, examples=True, pronunciation=True)
     images = ImagesConfig(enabled=True, only_for_pos=["noun"])
     cfg = _make_config(tmp_path, enrich=enrich, images=images)
     card = _card(
+        db,
         pos=POS.NOUN,
         forms={"gender": "m"},
         example="Jeg har et hus.",
@@ -217,7 +232,9 @@ class _FakeAnkiSync:
         return [{"noteId": 1, "fields": {"Word": {"value": "hus"}}, "tags": []}]
 
 
-async def test_corruption_still_caught_after_anki_sync_populates_cache(tmp_path: Path) -> None:
+async def test_corruption_still_caught_after_anki_sync_populates_cache(
+    tmp_path: Path, db: Database
+) -> None:
     """issue #28 checklist: "manually corrupt one card ... confirm doctor flags it"
     против *live-synced* БД, не просто bare-фикстуры. find_inconsistencies() читает
     только переданный ей list[Card] (из таблицы cards) — anki_cache (её заполняет
@@ -228,10 +245,8 @@ async def test_corruption_still_caught_after_anki_sync_populates_cache(tmp_path:
     её всё равно ловит."""
     enrich = EnrichConfig(grammar=True, examples=False, pronunciation=False)
     cfg = _make_config(tmp_path, enrich=enrich)
-    db = Database(tmp_path / "cards.db")
 
-    corrupted = _card(word="bil", status=Status.PUSHED, forms=None, anki_note_id=None)
-    db.insert_card(corrupted)
+    corrupted = _card(db, word="bil", status=Status.PUSHED, forms=None, anki_note_id=None)
 
     synced = await sync_anki_to_cache(db, _FakeAnkiSync(), cfg)  # type: ignore[arg-type]
     assert synced == 1

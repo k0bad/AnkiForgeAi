@@ -43,7 +43,7 @@ async def enrich_example_batch(cards: list[Card], level: str = "A2") -> list[Car
         str(item["id"]): item for item in raw if isinstance(item, dict) and "id" in item
     }
     for card in cards:
-        item = by_id.get(card.id)
+        item = by_id.get(str(card.id))
         if not item:
             continue
         if item.get("example"):

@@ -140,23 +140,33 @@ class TagsConfig(BaseModel):
 
 
 NoteFieldSlot = Literal[
-    "front_title", "front_audio", "front_image", "title_meta", "section", "tag", "hidden"
+    "front_title",
+    "front_sub",
+    "front_audio",
+    "front_image",
+    "pos",
+    "translation",
+    "example",
+    "forms",
+    "level",
+    "topic",
+    "id",
 ]
 
 
 class NoteFieldDef(BaseModel):
     """Одно поле Anki Note Type: источник данных (FIELD_RESOLVERS в anki/notetype.py)
-    и место в шаблоне карточки (slot)."""
+    и место в шаблоне карточки (slot). front_title/front_sub/pos/front_audio/front_image
+    рендерятся и на фронте, и в шапке бэка — оба билдера шаблона читают их по слоту
+    напрямую (front_template()/_build_header() в anki/notetype.py)."""
 
     name: str
     source: str
-    slot: NoteFieldSlot = "section"
-    optional: bool = False  # section: обернуть в {{#Field}}...{{/Field}} на бэке
+    slot: NoteFieldSlot = "translation"
+    optional: bool = False  # guarded-поля: {{#Field}}...{{/Field}}
     label_key: str | None = None  # ключ в back_labels/EN_BACK_LABELS; по умолчанию name.lower()
     css_class: str | None = None  # по умолчанию name.lower()
-    # title_meta/front_title поле: повторить в шапке бэка (см. _build_back_template)
-    recap_on_back: bool = False
-    # section-поле: не открывать свою секцию, вложить в div предыдущего section-поля
+    # example-поле: не открывать свою пару, вложить в пару предыдущего example-поля
     # (например ExampleTranslation внутрь Example — один блок "пример + перевод")
     nest_in_previous: bool = False
 
@@ -228,6 +238,14 @@ class Config(BaseModel):
             value = getattr(self.paths, field)
             if not value.is_absolute():
                 setattr(self.paths, field, PROJECT_ROOT / value)
+
+        # prompts/ — bundled read-only ресурс (как languages/, см. languages_dir()
+        # выше), не runtime-директория вроде db/logs/media. Если её нет рядом с
+        # PROJECT_ROOT (pip install вне git checkout), падаем на копию из wheel —
+        # иначе прочитать prompt без per-language копии (напр. dedupe_judge.md,
+        # см. issue #38) невозможно.
+        if not self.paths.prompts_dir.is_dir():
+            self.paths.prompts_dir = BUNDLED_PROMPTS_DIR
 
 
 # ───────────── Секреты из .env ─────────────
