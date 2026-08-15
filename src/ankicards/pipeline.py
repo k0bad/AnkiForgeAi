@@ -69,6 +69,7 @@ async def _run_enrich_stage(
     части карточек (id отсутствует в ответе) — это тоже неполный enrichment,
     просто без исключения, так что проверяем результат отдельно.
     """
+    logger.info("stage.start", stage=stage, count=len(cards))
     try:
         await fn(cards)
     except Exception as e:
@@ -81,6 +82,7 @@ async def _run_enrich_stage(
             )
         incomplete_ids.update(c.id for c in cards)
         return
+    logger.info("stage.done", stage=stage)
 
     for card in cards:
         if not is_complete(card):
@@ -111,12 +113,24 @@ async def enrich_and_generate_media(
     incomplete_ids: set[str] = set()
 
     if auto_enrich and cards:
-        # Pronunciation и translation — базовые стадии (одна попытка в batch-блоке)
+        # Pronunciation — обработана через _run_enrich_stage с per-card ошибками,
+        # как grammar/examples: раньше делила try/except с translation ниже, и падение
+        # batch-вызова не помечало карточки incomplete — они тихо уходили в APPROVED
+        # без произношения (тот же баг, что #7 чинил для grammar/examples, но не докрыл
+        # для этой стадии).
+        if cfg.enrich.pronunciation:
+            await _run_enrich_stage(
+                "pronunciation",
+                enrich_pronunciation_batch,
+                cards,
+                lambda c: bool(c.pronunciation),
+                db,
+                stats,
+                incomplete_ids,
+            )
+
+        # Translation — базовая стадия (без тумблера, всегда включена)
         try:
-            if cfg.enrich.pronunciation:
-                logger.info("stage.start", stage="pronunciation", count=len(cards))
-                await enrich_pronunciation_batch(cards)
-                logger.info("stage.done", stage="pronunciation")
             logger.info("stage.start", stage="translation", count=len(cards))
             for card in cards:
                 if not card.translation:

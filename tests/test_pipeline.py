@@ -142,6 +142,39 @@ async def test_enrich_stage_failure_routes_card_to_review_not_approved(
     assert rows[0]["card_id"] == card.id
 
 
+async def test_pronunciation_stage_failure_routes_card_to_review_not_approved(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Регрессия: pronunciation раньше делила try/except с translation и при падении
+    batch-вызова не помечала карточки incomplete — они тихо уходили в APPROVED
+    без произношения (тот же баг, что #7 чинил для grammar/examples)."""
+
+    async def _boom(cards: list[Card]) -> list[Card]:
+        raise RuntimeError("LLM недоступен")
+
+    monkeypatch.setattr(pipeline, "enrich_pronunciation_batch", _boom)
+
+    cfg = _make_config(tmp_path, grammar=False, examples=False, pronunciation=True)
+    card = _card("hus")
+    stats = await pipeline.run_ingest_pipeline(
+        [card], db=db, cfg=cfg, auto_enrich=True, auto_media=False
+    )
+
+    assert stats["errors"] == 1
+    assert stats["enrich_incomplete"] == 1
+    assert db.get_by_status(Status.APPROVED) == []
+    review_cards = db.get_by_status(Status.REVIEW)
+    assert len(review_cards) == 1
+    assert review_cards[0].word == "hus"
+
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT action, card_id FROM audit_log WHERE action = 'enrich_failed'"
+        ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["card_id"] == card.id
+
+
 async def test_enrich_partial_llm_response_routes_only_that_card_to_review(
     tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
