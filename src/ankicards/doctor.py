@@ -39,6 +39,8 @@ def find_inconsistencies(cards: list[Card], cfg: Config) -> list[Inconsistency]:
 
 
 def _check_card(card: Card, cfg: Config) -> list[Inconsistency]:
+    # _CHECKED_STATUSES (approved/pushed) — карточка уже прошла insert_card(), id есть.
+    assert card.id is not None
     problems: list[Inconsistency] = []
 
     if cfg.enrich.grammar and card.pos in _INFLECTED_POS and not card.forms:

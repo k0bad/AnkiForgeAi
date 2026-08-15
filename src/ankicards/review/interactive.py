@@ -45,6 +45,7 @@ def review_pending(db: Database, cfg: Config) -> None:
 
     try:
         for card in cards:
+            assert card.id is not None  # уже в БД (get_by_status), id всегда назначен
             decision = _load_last_decision(db, card.id)
             _show_card(card, decision)
 
@@ -89,8 +90,14 @@ async def _finalize_accepted(cards: list[Card], db: Database, cfg: Config) -> No
     результат (accept-ветка выше только собирает карточки в список, статус в
     SQLite ещё не меняет — старый status=review/pending остаётся, пока не
     отработает actions.accept_cards)."""
-    results = await actions.accept_cards([c.id for c in cards], db, cfg)
+    ids: list[int] = []
     for card in cards:
+        assert card.id is not None  # уже в БД, id всегда назначен
+        ids.append(card.id)
+
+    results = await actions.accept_cards(ids, db, cfg)
+    for card in cards:
+        assert card.id is not None
         card.status = Status(results[card.id])
         if card.status == Status.REVIEW:
             console.print(f"[yellow]⚠ {card.word}: enrichment неполный — возвращено в review[/]")
@@ -130,6 +137,7 @@ def _show_card(card: Card, decision: Decision | None) -> None:
 
 def _edit_card(db: Database, card: Card) -> None:
     """Простой редактор ключевых текстовых полей."""
+    assert card.id is not None  # уже в БД, id всегда назначен
     updates: dict[str, str] = {}
     for field in actions.EDITABLE_FIELDS:
         current = getattr(card, field) or ""
@@ -147,7 +155,7 @@ def _edit_card(db: Database, card: Card) -> None:
     console.print("[green]✓ обновлено[/]")
 
 
-def _load_last_decision(db: Database, card_id: str) -> Decision | None:
+def _load_last_decision(db: Database, card_id: int) -> Decision | None:
     """Достать последнее решение dedupe для карточки из audit_log."""
     with db.connect() as conn:
         row = conn.execute(

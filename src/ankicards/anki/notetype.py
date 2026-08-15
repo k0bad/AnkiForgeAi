@@ -470,7 +470,7 @@ def _resolve_topic(card: Card) -> str:
 
 
 def _resolve_id(card: Card) -> str:
-    return card.id
+    return str(card.id)
 
 
 FIELD_RESOLVERS: dict[str, Callable[[Card], str]] = {

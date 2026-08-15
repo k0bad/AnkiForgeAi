@@ -9,7 +9,6 @@ from __future__ import annotations
 from datetime import date
 from enum import StrEnum
 from typing import Literal
-from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -75,7 +74,7 @@ class Level(StrEnum):
 class Card(BaseModel):
     """Словарная карточка. Соответствует одной заметке в Anki."""
 
-    id: str = Field(default_factory=lambda: str(uuid4()))
+    id: int | None = None  # выделяется Database.insert_card() — наименьший свободный номер
     word: str  # основная форма (lemma)
     pronunciation: str | None = None  # практическая транскрипция или IPA — см. config.transcription
     translation: str  # 1-2 варианта
@@ -144,7 +143,7 @@ class Inconsistency(BaseModel):
     """Найденное doctor-проверкой расхождение между включённым тумблером
     enrichment-конфига и фактическими данными карточки."""
 
-    card_id: str
+    card_id: int
     word: str
     # "enrich.grammar" | "enrich.examples" | "enrich.pronunciation"
     # | "images.enabled" | "anki_note_id"
