@@ -28,6 +28,25 @@ async def test_structured_response_fills_translation_and_image_query(
     assert card.image_query == "house"
 
 
+async def test_multi_word_disambiguated_phrase_parses_into_image_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """issue #34: EN: теперь несёт короткую disambiguated-фразу (2-4 слова)
+    вместо голого 1-слова — парсинг должен принимать её как есть, без обрезки
+    до первого слова."""
+    monkeypatch.setattr(translation_module, "load_prompt", lambda name, **kw: "prompt")
+
+    async def _fake_call_text(prompt: str) -> str:
+        return "RU: пружина\nEN: metal coil spring"
+
+    monkeypatch.setattr(translation_module, "call_text", _fake_call_text)
+
+    card = await translation_module.enrich_translation(_card())
+
+    assert card.translation == "пружина"
+    assert card.image_query == "metal coil spring"
+
+
 async def test_unstructured_response_falls_back_to_plain_translation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
