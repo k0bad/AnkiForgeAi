@@ -120,6 +120,7 @@ async def test_unsplash_parses_results(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
     assert captured["url"] == images_module.UNSPLASH_SEARCH_URL
     assert captured["headers"]["Authorization"] == "Client-ID u-key"
+    assert captured["params"]["order_by"] == "relevant"
 
 
 async def test_pexels_parses_results(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -195,6 +196,7 @@ async def test_openverse_needs_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert results[0]["author"] == "Dana"
     assert captured["url"] == images_module.OPENVERSE_SEARCH_URL
+    assert captured["params"]["category"] == "photograph"
 
 
 async def test_fallback_used_when_primary_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:

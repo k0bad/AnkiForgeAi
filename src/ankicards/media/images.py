@@ -50,6 +50,7 @@ async def _search_unsplash(query: str, cfg: Config, count: int) -> list[dict[str
         "query": query,
         "per_page": count,
         "orientation": "squarish",
+        "order_by": "relevant",  # дефолт Unsplash и так "relevant", но не полагаемся на это неявно
     }
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(UNSPLASH_SEARCH_URL, params=params, headers=headers)
@@ -124,7 +125,12 @@ async def _search_pixabay(query: str, cfg: Config, count: int) -> list[dict[str,
 
 @http_retry
 async def _search_openverse(query: str, cfg: Config, count: int) -> list[dict[str, str]]:
-    params: dict[str, str | int] = {"q": query, "page_size": count, "license_type": "commercial"}
+    params: dict[str, str | int] = {
+        "q": query,
+        "page_size": count,
+        "license_type": "commercial",
+        "category": "photograph",  # исключает иллюстрации/арт, как Pixabay's image_type=photo
+    }
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(OPENVERSE_SEARCH_URL, params=params)
         response.raise_for_status()
