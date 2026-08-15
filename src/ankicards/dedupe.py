@@ -39,24 +39,17 @@ def _normalize(word: str) -> str:
     return normalized
 
 
-def check_card(
-    card: Card,
-    db: Database,
-    cfg: Config,
-    batch_candidates: list[tuple[str, str]] | None = None,
-) -> Decision:
-    """Проверить одного кандидата.
+def check_card(card: Card, db: Database, cfg: Config) -> Decision:
+    """Проверить одного кандидата против staging (db.all_words()) и кэша Anki.
 
-    `batch_candidates` — (id, word) карточек, уже принятых в этом же прогоне
-    ingest, но ещё не вставленных в БД (insert для "new" карточек происходит
-    только в конце run_ingest_pipeline) — без них дубликаты внутри одного
-    батча (например, LLM дважды вернул похожее слово) остаются незамеченными.
+    Кандидаты внутри одного батча ingest тоже ловятся: run_ingest_pipeline
+    вставляет каждую принятую "new"-карточку в БД сразу же (id нужен ещё до
+    enrich/media — см. db.py::_next_free_id), так что уже проверенные в этом
+    же прогоне карточки видны здесь через staging без отдельного механизма.
     """
     staging = db.all_words()
     anki_cache = [(str(nid), w) for nid, w in db.all_anki_words()]
-    candidates = [
-        c for c in staging + anki_cache + (batch_candidates or []) if c[0] != card.id
-    ]
+    candidates = [c for c in staging + anki_cache if c[0] != str(card.id)]
 
     if not candidates:
         return Decision(decision="new")

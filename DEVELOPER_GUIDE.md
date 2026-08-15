@@ -378,7 +378,8 @@ CREATE TABLE audit_log (
     timestamp   TEXT NOT NULL,               -- UTC ISO
     action      TEXT NOT NULL,               -- create/skip_duplicate/push/review_needed/review_accept/...
     card_id     TEXT,                        -- FK → cards.id (может быть NULL)
-    details     TEXT                         -- JSON с деталями операции
+    details     TEXT,                        -- JSON с деталями операции
+    run_id      TEXT                         -- FK к structlog run_id того же вызова (см. ниже)
 );
 
 CREATE TABLE anki_cache (
@@ -389,6 +390,30 @@ CREATE TABLE anki_cache (
     synced_at   TEXT NOT NULL                -- время последней синхронизации
 );
 ```
+
+### Два уровня логирования: structlog vs audit_log
+
+В проекте два независимых механизма логирования, с разной зоной ответственности:
+
+| | `structlog` (`log.py`) | `audit_log` (`db.py`) |
+|---|---|---|
+| Что | Операционная трасса одного запуска CLI | Персистентная история фактов по карточке |
+| Живёт | Пока не улетит в stderr/JSON — не хранится | Вечно, в SQLite, между запусками |
+| Гранулярность | Событие (`stage.start`, retry, parse-ошибка, ...) | Факт с `card_id` (create/push/review_skip/...) |
+| Как получить | `get_logger(__name__)` + `.info/.warning/.error(...)` | `db.log_action(action, card_id, details)` |
+| Читает кто | Оператор/монитор в моменте (или лог-агрегатор) | `doctor`, `review` (последний `review_needed`), сам аудит |
+
+Оба источника связаны через **`run_id`**: `bound_run(command)` в `cli.py` привязывает `run_id` + имя команды к structlog-контексту (`contextvars`) на время одного CLI-вызова; `db.log_action()` читает тот же `run_id` из контекста и пишет его в колонку `audit_log.run_id`. Так можно по одному `run_id` восстановить и live-трассу конкретного запуска, и все карточные факты, которые он произвёл.
+
+Кто чем пишет — по слоям:
+
+1. **Оркестрация с решениями по карточке** (`pipeline.py`, `review/actions.py`, `review/interactive.py`) — пишет **и туда, и туда** через `pipeline._record(db, level, action, card_id, **details)`: один вызов, два места записи, названия события в structlog и `action` в `audit_log` совпадают (`enrich_failed`, `audio_generated`, `push`, `review_skip`, ...), чтобы не пришлось искать соответствие. Само решение — "это facts достойный аудита" — принимается здесь, а не в низкоуровневых модулях ниже.
+   Отдельно, для событий без `card_id` (прогресс, а не факт по карточке) — голый `logger.info` с точечным именем: `stage.start`/`stage.done` вокруг каждой enrichment-стадии в `enrich_and_generate_media()`.
+2. **Низкоуровневые модули** (`dedupe.py`, `llm.py`, `_net.py`, `anki/connect.py`, `media/tts.py`, `media/images.py`, `notify/`) — только `structlog`, без `audit_log`: retry-попытки, сетевые ошибки, разбор ответа LLM. Эти модули не знают, к какой карточке (если вообще к какой-то) относится вызов и является ли сбой окончательным — это решает вызывающий код в оркестрации (слой 1), который уже видит `card_id` и итоговый статус.
+3. **Разовые операции без карточки** (`anki/notetype.py` — создание/синхронизация Note Type при `init`) — только `structlog`, без `audit_log`: писать некуда (`card_id` нет), а сам факт нужен только как трасса запуска `init`, для которой достаточно `run_id`.
+4. **Бэкстоп на непредвиденное** — `bound_run()` перехватывает любое необработанное исключение внутри `with bound_run(...):`, логирует `command.failed` с полным traceback и перевыбрасывает. Это не замена точечному логированию в перечисленных выше слоях, а гарантия, что вообще никакой сбой не пройдёт совсем без следа.
+
+Итог по review-действиям (issue #31): `audit_log` был и остаётся источником истины по карточным решениям (`review_accept`/`review_skip`/`review_suspend`/`review_resume`/`review_edit`/`review_finalized`) — но раньше писался напрямую через `db.log_action()`, без парного structlog-события. С #31 `review/actions.py` и `review/interactive.py` переиспользуют тот же `pipeline._record()`, что и остальная оркестрация (слой 1 выше), так что review-сессии (включая безтерминальные `review accept`/`skip`/... для управления из AI-агента) теперь видны и в live-трассе, а не только постфактум через SQL-запрос к `audit_log`.
 
 ---
 
