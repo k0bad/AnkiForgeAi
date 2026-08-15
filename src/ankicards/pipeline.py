@@ -75,11 +75,7 @@ async def _run_enrich_stage(
     except Exception as e:
         stats["errors"] += 1
         for card in cards:
-            db.log_action(
-                "enrich_failed",
-                card_id=card.id,
-                details={"stage": stage, "error": str(e)},
-            )
+            _record(db, "warning", "enrich_failed", card.id, stage=stage, error=str(e))
         incomplete_ids.update(c.id for c in cards)
         return
     logger.info("stage.done", stage=stage)
@@ -87,11 +83,7 @@ async def _run_enrich_stage(
     for card in cards:
         if not is_complete(card):
             incomplete_ids.add(card.id)
-            db.log_action(
-                "enrich_incomplete",
-                card_id=card.id,
-                details={"stage": stage},
-            )
+            _record(db, "warning", "enrich_incomplete", card.id, stage=stage)
 
 
 async def enrich_and_generate_media(
