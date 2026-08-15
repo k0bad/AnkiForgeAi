@@ -46,7 +46,7 @@ async def enrich_pronunciation_batch(cards: list[Card]) -> list[Card]:
     }
 
     for card in cards:
-        pron = by_id.get(card.id)
+        pron = by_id.get(str(card.id))
         if pron:
             card.pronunciation = pron.strip()
     return cards

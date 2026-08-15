@@ -48,6 +48,7 @@ async def enrich_grammar_batch(cards: list[Card]) -> list[Card]:
             forms_by_id[str(item["id"])] = item.get("forms")
 
     for card in cards:
-        if card.id in forms_by_id and forms_by_id[card.id]:
-            card.forms = forms_by_id[card.id]
+        key = str(card.id)
+        if key in forms_by_id and forms_by_id[key]:
+            card.forms = forms_by_id[key]
     return cards

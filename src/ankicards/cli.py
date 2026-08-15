@@ -11,9 +11,11 @@
     review edit <id> -f k=v       Отредактировать поля карточки — без TTY
     push                          Approved → Anki
     sync                          Обновить кэш заметок из Anki
+    delete <id...>                Удалить карточки насовсем (Anki + БД), освободить номер
     stats                         Статистика по статусам
     init                          Инициализация БД и Note Type в Anki
     doctor                        Проверка согласованности карточек с enrich-конфигом
+    migrate-ids                   Разовая миграция id: UUID -> последовательные числа
 """
 
 from __future__ import annotations
@@ -38,16 +40,20 @@ from .anki.notetype import (
 )
 from .anki.notetype import _get_note_type_name as get_note_type_name
 from .anki.sync import sync_anki_to_cache
-from .config import get_config
-from .db import Database
+from .config import Config, get_config
+from .db import Database, IdMigrationRequiredError
 from .doctor import find_inconsistencies
 from .ingest.topic import ingest_by_topic
 from .ingest.url import ingest_from_url
-from .log import bound_run
+from .log import bound_run, get_logger
+from .migrate_ids import migrate_ids as run_migrate_ids
+from .migrate_ids import needs_migration
 from .models import Status
 from .pipeline import NoteTypeMissingError, push_approved, run_ingest_pipeline
 from .review import actions as review_actions
 from .review.interactive import review_pending
+
+logger = get_logger(__name__)
 
 
 def _force_utf8_stdio() -> None:
@@ -73,6 +79,16 @@ app.add_typer(review_app, name="review")
 console = Console()
 
 
+def _open_db(cfg: Config) -> Database:
+    """Открыть Database, но с понятной ошибкой вместо трейсбека, если БД ещё
+    на старой (UUID) схеме id и ждёт `ankiforgeai migrate-ids`."""
+    try:
+        return Database(cfg.paths.db)
+    except IdMigrationRequiredError as e:
+        console.print(f"[red]✗[/] {e}")
+        raise typer.Exit(code=1) from e
+
+
 @app.command()
 def setup() -> None:
     """Интерактивный мастер первичной настройки."""
@@ -92,7 +108,7 @@ def init() -> None:
         console.print(f"[red]✗[/] Некорректная схема полей (anki.fields в language.yaml): {e}")
         raise typer.Exit(code=1) from e
 
-    Database(cfg.paths.db)
+    _open_db(cfg)
     console.print(f"[green]✓[/] БД создана: {cfg.paths.db}")
 
     async def _run() -> None:
@@ -100,6 +116,7 @@ def init() -> None:
         try:
             await anki.ensure_deck()
         except Exception as e:
+            logger.warning("anki.unreachable", error=str(e))
             console.print(
                 f"[yellow]![/] Anki недоступен, Note Type не создан: {e}\n"
                 "    Запусти `ankiforgeai init` ещё раз, когда Anki будет открыт "
@@ -117,16 +134,20 @@ def init() -> None:
             await anki.update_model_templates(
                 note_type, {CARD_TEMPLATE_NAME: {"Front": front, "Back": back}}
             )
+            logger.info("notetype.templates_synced", note_type=note_type)
             await anki.update_model_styling(note_type, CSS)
+            logger.info("notetype.styling_synced", note_type=note_type)
             console.print(f"[green]✓[/] Note Type обновлён (дизайн синхронизирован): {note_type}")
             return
 
+        fields = field_names()
         await anki.create_model(
             model_name=note_type,
-            fields=field_names(),
+            fields=fields,
             css=CSS,
             card_templates=[{"Name": CARD_TEMPLATE_NAME, "Front": front, "Back": back}],
         )
+        logger.info("notetype.created", note_type=note_type, field_count=len(fields))
         console.print(f"[green]✓[/] Note Type создан: {note_type}")
 
     with bound_run("init"):
@@ -142,7 +163,7 @@ def ingest_url_cmd(
 ) -> None:
     """Извлечь слова со страницы по URL."""
     cfg = get_config()
-    db = Database(cfg.paths.db)
+    db = _open_db(cfg)
 
     async def _run() -> dict:
         if not as_json:
@@ -170,7 +191,7 @@ def ingest_topic_cmd(
 ) -> None:
     """Сгенерировать слова по теме через Claude."""
     cfg = get_config()
-    db = Database(cfg.paths.db)
+    db = _open_db(cfg)
 
     async def _run() -> dict:
         if not as_json:
@@ -196,7 +217,7 @@ def review(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is not None:
         return
     cfg = get_config()
-    db = Database(cfg.paths.db)
+    db = _open_db(cfg)
     with bound_run("review"):
         review_pending(db, cfg)
 
@@ -207,7 +228,7 @@ def review_list_cmd(
 ) -> None:
     """Список карточек на ревью (review + pending) — без TTY."""
     cfg = get_config()
-    db = Database(cfg.paths.db)
+    db = _open_db(cfg)
     cards = db.get_by_status(Status.REVIEW) + db.get_by_status(Status.PENDING)
 
     if as_json:
@@ -225,7 +246,7 @@ def review_list_cmd(
     table.add_column("translation")
     table.add_column("status")
     for c in cards:
-        table.add_row(c.id, c.word, c.pos.value, c.translation, c.status.value)
+        table.add_row(str(c.id), c.word, c.pos.value, c.translation, c.status.value)
     console.print(table)
 
 
@@ -238,12 +259,12 @@ _FIELD_OPT = typer.Option(..., "--field", "-f", help=_FIELD_HELP)
 
 @review_app.command("accept")
 def review_accept_cmd(
-    card_ids: list[str] = _CARD_IDS_ARG,
+    card_ids: list[int] = _CARD_IDS_ARG,
     as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
 ) -> None:
     """Принять карточки без TTY: enrich + media, затем approved."""
     cfg = get_config()
-    db = Database(cfg.paths.db)
+    db = _open_db(cfg)
 
     with bound_run("review_accept"):
         try:
@@ -261,10 +282,10 @@ def review_accept_cmd(
 
 
 @review_app.command("skip")
-def review_skip_cmd(card_ids: list[str] = _CARD_IDS_ARG) -> None:
+def review_skip_cmd(card_ids: list[int] = _CARD_IDS_ARG) -> None:
     """Пометить карточки как skipped без TTY."""
     cfg = get_config()
-    db = Database(cfg.paths.db)
+    db = _open_db(cfg)
     with bound_run("review_skip"):
         try:
             review_actions.skip_cards(card_ids, db)
@@ -276,10 +297,10 @@ def review_skip_cmd(card_ids: list[str] = _CARD_IDS_ARG) -> None:
 
 
 @review_app.command("suspend")
-def review_suspend_cmd(card_ids: list[str] = _CARD_IDS_ARG) -> None:
+def review_suspend_cmd(card_ids: list[int] = _CARD_IDS_ARG) -> None:
     """Пометить карточки как suspended без TTY."""
     cfg = get_config()
-    db = Database(cfg.paths.db)
+    db = _open_db(cfg)
     with bound_run("review_suspend"):
         try:
             review_actions.suspend_cards(card_ids, db)
@@ -291,10 +312,10 @@ def review_suspend_cmd(card_ids: list[str] = _CARD_IDS_ARG) -> None:
 
 
 @review_app.command("resume")
-def review_resume_cmd(card_ids: list[str] = _CARD_IDS_ARG) -> None:
+def review_resume_cmd(card_ids: list[int] = _CARD_IDS_ARG) -> None:
     """Вернуть suspended/skipped карточки обратно в review без TTY."""
     cfg = get_config()
-    db = Database(cfg.paths.db)
+    db = _open_db(cfg)
     with bound_run("review_resume"):
         try:
             review_actions.resume_cards(card_ids, db)
@@ -307,7 +328,7 @@ def review_resume_cmd(card_ids: list[str] = _CARD_IDS_ARG) -> None:
 
 @review_app.command("edit")
 def review_edit_cmd(
-    card_id: str,
+    card_id: int,
     field: list[str] = _FIELD_OPT,
 ) -> None:
     """Отредактировать текстовые поля карточки без TTY."""
@@ -320,7 +341,7 @@ def review_edit_cmd(
         updates[key] = value
 
     cfg = get_config()
-    db = Database(cfg.paths.db)
+    db = _open_db(cfg)
     with bound_run("review_edit"):
         try:
             updated = review_actions.edit_card(card_id, updates, db)
@@ -334,7 +355,7 @@ def review_edit_cmd(
 def push(as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод")) -> None:
     """Отправить approved-карточки в Anki."""
     cfg = get_config()
-    db = Database(cfg.paths.db)
+    db = _open_db(cfg)
     anki = AnkiConnect(cfg)
 
     async def _run() -> int:
@@ -357,7 +378,7 @@ def push(as_json: bool = typer.Option(False, "--json", help="Машиночит�
 def sync(as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод")) -> None:
     """Обновить локальный кэш из Anki."""
     cfg = get_config()
-    db = Database(cfg.paths.db)
+    db = _open_db(cfg)
     anki = AnkiConnect(cfg)
 
     async def _run() -> int:
@@ -377,10 +398,47 @@ def sync(as_json: bool = typer.Option(False, "--json", help="Машиночит�
 
 
 @app.command()
+def delete(
+    card_ids: list[int] = _CARD_IDS_ARG,
+    as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
+) -> None:
+    """Удалить карточки насовсем и освободить их номер для новых карточек.
+
+    Если карточка уже запушена в Anki, вместе с заметкой стирается и её
+    история повторений/интервалов там — это необратимо.
+    """
+    cfg = get_config()
+    db = _open_db(cfg)
+    anki = AnkiConnect(cfg)
+
+    if not as_json:
+        console.print(
+            "[yellow]![/] Удаление уже запушенной карточки стирает её историю "
+            "повторений в Anki — это необратимо."
+        )
+
+    async def _run() -> list[int]:
+        return await review_actions.delete_cards(card_ids, db, anki)
+
+    with bound_run("delete"):
+        try:
+            deleted = asyncio.run(_run())
+        except (ValueError, AnkiConnectError) as e:
+            console.print(f"[red]✗[/] {e}")
+            raise typer.Exit(code=1) from e
+
+    if as_json:
+        print(json.dumps({"deleted": deleted}, ensure_ascii=False))
+        return
+    for card_id in deleted:
+        console.print(f"[red]deleted[/] {card_id}")
+
+
+@app.command()
 def stats(as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод")) -> None:
     """Статистика по статусам."""
     cfg = get_config()
-    db = Database(cfg.paths.db)
+    db = _open_db(cfg)
 
     counts = {status.value: len(db.get_by_status(status)) for status in Status}
     anki_cached = len(db.all_anki_words())
@@ -406,7 +464,7 @@ def doctor(
 ) -> None:
     """Сверить approved/pushed карточки с включёнными enrich/images тумблерами (issue #9)."""
     cfg = get_config()
-    db = Database(cfg.paths.db)
+    db = _open_db(cfg)
 
     cards = db.get_by_status(Status.APPROVED) + db.get_by_status(Status.PUSHED)
     problems = find_inconsistencies(cards, cfg)
@@ -422,11 +480,66 @@ def doctor(
         table.add_column("Проверка")
         table.add_column("Причина")
         for p in problems:
-            table.add_row(p.card_id, p.word, p.check, p.reason)
+            table.add_row(str(p.card_id), p.word, p.check, p.reason)
         console.print(table)
 
     if problems:
         raise typer.Exit(code=1)
+
+
+@app.command(name="migrate-ids")
+def migrate_ids_cmd(
+    as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
+) -> None:
+    """Разовая миграция: card.id UUID -> последовательные целые числа (1, 2, 3, ...).
+
+    Нужен запущенный Anki с AnkiConnect — обновляет скрытое поле ID на уже
+    запушенных заметках. Перед изменениями делает резервную копию БД. Можно
+    перезапускать сколько угодно раз: если уже мигрировано — ничего не делает.
+    """
+    cfg = get_config()
+
+    if not needs_migration(cfg.paths.db):
+        if as_json:
+            print(json.dumps({"already_current": True}, ensure_ascii=False))
+        else:
+            console.print("[green]✓[/] Уже мигрировано — id целочисленные.")
+        return
+
+    if not as_json:
+        console.print(
+            f"[yellow]![/] Перенумеровываю карточки в {cfg.paths.db} и обновляю "
+            "скрытое поле ID на уже запушенных заметках в Anki."
+        )
+
+    anki = AnkiConnect(cfg)
+    with bound_run("migrate_ids"):
+        result = asyncio.run(run_migrate_ids(cfg.paths.db, anki))
+
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "backup_path": str(result.backup_path) if result.backup_path else None,
+                    "cards_migrated": result.cards_migrated,
+                    "audit_rows_remapped": result.audit_rows_remapped,
+                    "anki_updated": result.anki_updated,
+                    "anki_failed": result.anki_failed,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+
+    console.print(f"[green]✓[/] Перенумеровано карточек: {result.cards_migrated}")
+    console.print(f"[green]✓[/] Обновлено записей audit_log: {result.audit_rows_remapped}")
+    console.print(f"[green]✓[/] Обновлено заметок в Anki: {result.anki_updated}")
+    if result.anki_failed:
+        console.print(f"[red]✗[/] Не удалось обновить в Anki: {len(result.anki_failed)}")
+        for new_id, error in result.anki_failed:
+            console.print(f"    id={new_id}: {error}")
+    console.print(f"[dim]Резервная копия: {result.backup_path}[/]")
 
 
 def _print_stats(stats: dict) -> None:
