@@ -239,6 +239,14 @@ class Config(BaseModel):
             if not value.is_absolute():
                 setattr(self.paths, field, PROJECT_ROOT / value)
 
+        # prompts/ — bundled read-only ресурс (как languages/, см. languages_dir()
+        # выше), не runtime-директория вроде db/logs/media. Если её нет рядом с
+        # PROJECT_ROOT (pip install вне git checkout), падаем на копию из wheel —
+        # иначе прочитать prompt без per-language копии (напр. dedupe_judge.md,
+        # см. issue #38) невозможно.
+        if not self.paths.prompts_dir.is_dir():
+            self.paths.prompts_dir = BUNDLED_PROMPTS_DIR
+
 
 # ───────────── Секреты из .env ─────────────
 

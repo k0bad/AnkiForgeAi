@@ -22,6 +22,7 @@ from rich.table import Table
 from ..config import Config
 from ..db import Database
 from ..models import Card, Decision, Status
+from ..pipeline import _record
 from . import actions
 
 console = Console()
@@ -69,7 +70,7 @@ def review_pending(db: Database, cfg: Config) -> None:
                 # Enrich/media запускаются батчем в конце сессии — см. actions.accept_cards
                 # ниже (issue #11: раньше accept просто менял статус, ничего не enrich'я).
                 accepted.append(card)
-                db.log_action("review_accept", card_id=card.id, details={})
+                _record(db, "info", "review_accept", card.id)
                 console.print("[green]✓ approved (enrichment — в конце сессии)[/]")
             elif verb == "skip":
                 actions.skip_cards([card.id], db)

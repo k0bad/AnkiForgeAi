@@ -12,7 +12,7 @@ from ..anki.connect import AnkiConnect
 from ..config import Config
 from ..db import Database
 from ..models import Card, Status
-from ..pipeline import delete_card_record, enrich_and_generate_media
+from ..pipeline import _record, delete_card_record, enrich_and_generate_media
 
 EDITABLE_FIELDS = ("word", "translation", "example", "example_translation")
 
@@ -44,7 +44,7 @@ async def accept_cards(card_ids: list[int], db: Database, cfg: Config) -> dict[i
         assert card.id is not None
         card.status = Status.REVIEW if card.id in incomplete_ids else Status.APPROVED
         db.update_card(card)
-        db.log_action("review_finalized", card_id=card.id, details={"status": card.status.value})
+        _record(db, "info", "review_finalized", card.id, status=card.status.value)
         results[card.id] = card.status.value
     return results
 
@@ -72,7 +72,7 @@ def _set_status(card_ids: list[int], status: Status, action: str, db: Database) 
     _require_cards(card_ids, db)
     for card_id in card_ids:
         db.update_status(card_id, status)
-        db.log_action(action, card_id=card_id, details={})
+        _record(db, "info", action, card_id)
     return card_ids
 
 
@@ -103,7 +103,7 @@ def edit_card(card_id: int, updates: dict[str, str], db: Database) -> Card:
     with db.connect() as conn:
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         conn.execute(f"UPDATE cards SET {set_clause} WHERE id = ?", (*updates.values(), card_id))
-    db.log_action("review_edit", card_id=card_id, details=updates)
+    _record(db, "info", "review_edit", card_id, **updates)
 
     updated = db.get_by_id(card_id)
     assert updated is not None

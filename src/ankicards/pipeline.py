@@ -88,27 +88,21 @@ async def _run_enrich_stage(
     части карточек (id отсутствует в ответе) — это тоже неполный enrichment,
     просто без исключения, так что проверяем результат отдельно.
     """
+    logger.info("stage.start", stage=stage, count=len(cards))
     try:
         await fn(cards)
     except Exception as e:
         stats["errors"] += 1
         for card in cards:
-            db.log_action(
-                "enrich_failed",
-                card_id=card.id,
-                details={"stage": stage, "error": str(e)},
-            )
+            _record(db, "warning", "enrich_failed", card.id, stage=stage, error=str(e))
         incomplete_ids.update(_card_id(c) for c in cards)
         return
+    logger.info("stage.done", stage=stage)
 
     for card in cards:
         if not is_complete(card):
             incomplete_ids.add(_card_id(card))
-            db.log_action(
-                "enrich_incomplete",
-                card_id=card.id,
-                details={"stage": stage},
-            )
+            _record(db, "warning", "enrich_incomplete", card.id, stage=stage)
 
 
 async def enrich_and_generate_media(
@@ -130,12 +124,24 @@ async def enrich_and_generate_media(
     incomplete_ids: set[int] = set()
 
     if auto_enrich and cards:
-        # Pronunciation и translation — базовые стадии (одна попытка в batch-блоке)
+        # Pronunciation — обработана через _run_enrich_stage с per-card ошибками,
+        # как grammar/examples: раньше делила try/except с translation ниже, и падение
+        # batch-вызова не помечало карточки incomplete — они тихо уходили в APPROVED
+        # без произношения (тот же баг, что #7 чинил для grammar/examples, но не докрыл
+        # для этой стадии).
+        if cfg.enrich.pronunciation:
+            await _run_enrich_stage(
+                "pronunciation",
+                enrich_pronunciation_batch,
+                cards,
+                lambda c: bool(c.pronunciation),
+                db,
+                stats,
+                incomplete_ids,
+            )
+
+        # Translation — базовая стадия (без тумблера, всегда включена)
         try:
-            if cfg.enrich.pronunciation:
-                logger.info("stage.start", stage="pronunciation", count=len(cards))
-                await enrich_pronunciation_batch(cards)
-                logger.info("stage.done", stage="pronunciation")
             logger.info("stage.start", stage="translation", count=len(cards))
             for card in cards:
                 if not card.translation:
@@ -166,6 +172,28 @@ async def enrich_and_generate_media(
                         "enrich_incomplete",
                         card_id=card.id,
                         details={"stage": "translation"},
+                    )
+
+        # image_query (англ. gloss для поиска картинок) генерируется тем же LLM-вызовом,
+        # что и translation, но парсится отдельной строкой ("EN:") и может не прийти,
+        # даже когда ru распарсился нормально. card.translation тут не считается
+        # incomplete — перевод корректен, — но без трассы это тихо роняет качество
+        # image-поиска (attach_image() падает обратно на card.word, см. issue #10),
+        # и ничего не сигналит об этом (issue #29). Актуально только для карточек,
+        # которым вообще будут искать картинку.
+        if cfg.images.enabled:
+            for card in cards:
+                if (
+                    card.translation
+                    and not card.image_query
+                    and card.pos.value in cfg.images.only_for_pos
+                ):
+                    _record(
+                        db,
+                        "warning",
+                        "translation.image_query_missing",
+                        card.id,
+                        word=card.word,
                     )
 
         # Grammar и examples — обработаны через _run_enrich_stage с per-card ошибками
