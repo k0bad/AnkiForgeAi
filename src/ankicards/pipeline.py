@@ -45,12 +45,31 @@ class NoteTypeMissingError(Exception):
         )
 
 
-def _record(db: Database, level: str, action: str, card_id: str | None, **details: object) -> None:
+def _record(db: Database, level: str, action: str, card_id: int | None, **details: object) -> None:
     """Записать событие и в audit_log (SQLite, персистентный audit), и в structlog
     (live-трасса текущего run_id — см. log.bound_run). Одна точка вместо двух
     рассинхронизирующихся вызовов на каждое событие пайплайна."""
     db.log_action(action, card_id=card_id, details=details)
     getattr(logger, level)(action, card_id=card_id, **details)
+
+
+def delete_card_record(db: Database, card: Card, action: str) -> None:
+    """Стереть карточку из локальной БД насовсем — её номер освобождается и
+    достанется следующей новой карточке (см. db.py::_next_free_id). Общая
+    точка для review/actions.delete_cards (явная команда `ankiforgeai delete`)
+    и anki/sync.py (заметку удалили прямо в Anki) — сам вызов AnkiConnect
+    deleteNotes (если он вообще нужен) остаётся на совести вызывающего кода.
+    """
+    assert card.id is not None, "delete_card_record ожидает уже сохранённую карточку"
+    _record(db, "info", action, card.id, word=card.word, anki_note_id=card.anki_note_id)
+    db.delete_card(card.id)
+
+
+def _card_id(card: Card) -> int:
+    """card.id как int — enrich-стадии получают только уже вставленные карточки
+    (id выделяется до них, см. run_ingest_pipeline и review/actions.accept_cards)."""
+    assert card.id is not None
+    return card.id
 
 
 async def _run_enrich_stage(
@@ -60,7 +79,7 @@ async def _run_enrich_stage(
     is_complete: Callable[[Card], bool],
     db: Database,
     stats: dict,
-    incomplete_ids: set[str],
+    incomplete_ids: set[int],
 ) -> None:
     """Прогнать один batch-вызов enrichment; отследить провал и неполный результат.
 
@@ -76,13 +95,13 @@ async def _run_enrich_stage(
         stats["errors"] += 1
         for card in cards:
             _record(db, "warning", "enrich_failed", card.id, stage=stage, error=str(e))
-        incomplete_ids.update(c.id for c in cards)
+        incomplete_ids.update(_card_id(c) for c in cards)
         return
     logger.info("stage.done", stage=stage)
 
     for card in cards:
         if not is_complete(card):
-            incomplete_ids.add(card.id)
+            incomplete_ids.add(_card_id(card))
             _record(db, "warning", "enrich_incomplete", card.id, stage=stage)
 
 
@@ -92,7 +111,7 @@ async def enrich_and_generate_media(
     cfg: Config,
     auto_enrich: bool = True,
     auto_media: bool = True,
-) -> tuple[dict, set[str]]:
+) -> tuple[dict, set[int]]:
     """Прогнать enrich- и media-стадии для карточек, уже прошедших dedupe.
 
     Общий шаг для run_ingest_pipeline (accepted-кандидаты) и review_pending
@@ -102,7 +121,7 @@ async def enrich_and_generate_media(
     код должен вернуть такие карточки в review, а не помечать approved.
     """
     stats: dict = {"enriched": 0, "enrich_incomplete": 0, "audio": 0, "errors": 0}
-    incomplete_ids: set[str] = set()
+    incomplete_ids: set[int] = set()
 
     if auto_enrich and cards:
         # Pronunciation — обработана через _run_enrich_stage с per-card ошибками,
@@ -145,10 +164,10 @@ async def enrich_and_generate_media(
                     card_id=card.id,
                     details={"stage": "translation", "error": str(e)},
                 )
-                incomplete_ids.add(card.id)
+                incomplete_ids.add(_card_id(card))
             else:
                 if not card.translation:
-                    incomplete_ids.add(card.id)
+                    incomplete_ids.add(_card_id(card))
                     db.log_action(
                         "enrich_incomplete",
                         card_id=card.id,
@@ -249,9 +268,8 @@ async def run_ingest_pipeline(
     }
 
     accepted: list[Card] = []
-    accepted_candidates: list[tuple[str, str]] = []
     for card in cards:
-        decision = check_card(card, db, cfg, batch_candidates=accepted_candidates)
+        decision = check_card(card, db, cfg)
         decision = await judge_review(card, decision, cfg)
         if decision.decision == "merge":
             _record(
@@ -278,9 +296,12 @@ async def run_ingest_pipeline(
             )
             stats["review"] += 1
             continue
+        # Выделяем id сразу (INSERT, не UPDATE) — enrich_and_generate_media ниже
+        # уже использует card.id для имён медиафайлов, значит номер должен
+        # существовать до неё, а не после. Финальное сохранение ниже — update_card.
+        db.insert_card(card)
         logger.debug("dedupe.accepted", card_id=card.id, word=card.word)
         accepted.append(card)
-        accepted_candidates.append((card.id, card.word))
         stats["new"] += 1
 
     enrich_stats, incomplete_ids = await enrich_and_generate_media(
@@ -290,7 +311,7 @@ async def run_ingest_pipeline(
 
     for card in accepted:
         card.status = Status.REVIEW if card.id in incomplete_ids else Status.APPROVED
-        db.insert_card(card)
+        db.update_card(card)
         _record(db, "info", "create", card.id, word=card.word)
 
     return stats

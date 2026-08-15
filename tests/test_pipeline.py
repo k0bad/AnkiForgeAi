@@ -70,9 +70,7 @@ def _stub_audio(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_new_card_gets_approved_and_saved(tmp_path: Path, db: Database) -> None:
     cfg = _make_config(tmp_path)
 
-    stats = await pipeline.run_ingest_pipeline(
-        [_card("hus")], db=db, cfg=cfg, auto_enrich=False
-    )
+    stats = await pipeline.run_ingest_pipeline([_card("hus")], db=db, cfg=cfg, auto_enrich=False)
 
     assert stats["new"] == 1
     assert stats["merged"] == 0
@@ -85,9 +83,7 @@ async def test_exact_duplicate_is_merged_not_saved(tmp_path: Path, db: Database)
     cfg = _make_config(tmp_path)
     db.insert_card(_card("hus"))
 
-    stats = await pipeline.run_ingest_pipeline(
-        [_card("Hus")], db=db, cfg=cfg, auto_enrich=False
-    )
+    stats = await pipeline.run_ingest_pipeline([_card("Hus")], db=db, cfg=cfg, auto_enrich=False)
 
     assert stats["merged"] == 1
     assert stats["new"] == 0
@@ -98,8 +94,10 @@ async def test_duplicate_within_same_batch_is_merged_not_both_saved(
     tmp_path: Path, db: Database
 ) -> None:
     """Регрессия на #13: LLM вернул одно и то же слово дважды в одном ответе —
-    второе должно поймать первое как дубликат, а не проскочить как "new",
-    т.к. первое ещё не успело попасть в БД (insert только в конце функции)."""
+    второе должно поймать первое как дубликат, а не проскочить как "new".
+    Карточка вставляется в БД сразу при принятии (см. db.py::_next_free_id),
+    так что уже принятая в этом же батче карточка видна следующей проверке
+    через staging (db.all_words()) без отдельного механизма."""
     cfg = _make_config(tmp_path)
 
     stats = await pipeline.run_ingest_pipeline(

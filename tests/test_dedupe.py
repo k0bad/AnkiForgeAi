@@ -92,7 +92,7 @@ def test_exact_match_returns_merge(db: Database, cfg: Config) -> None:
     decision = check_card(candidate, db, cfg)
 
     assert decision.decision == "merge"
-    assert decision.matches[0].existing_card_id == existing.id
+    assert decision.matches[0].existing_card_id == str(existing.id)
     assert decision.matches[0].score == 100.0
 
 
@@ -137,37 +137,6 @@ def test_ignores_self_id(db: Database, cfg: Config) -> None:
 
     decision = check_card(card, db, cfg)
 
-    assert decision.decision == "new"
-
-
-def test_batch_candidates_catch_exact_duplicate_not_yet_in_db(
-    db: Database, cfg: Config
-) -> None:
-    """Кандидат, принятый ранее в этом же батче, ещё не в БД — должен всё равно
-    поймать дубликат через batch_candidates."""
-    first = _card("bil")
-    candidate = _card("Bil")
-
-    decision = check_card(candidate, db, cfg, batch_candidates=[(first.id, first.word)])
-
-    assert decision.decision == "merge"
-    assert decision.matches[0].existing_card_id == first.id
-
-
-def test_batch_candidates_catch_fuzzy_duplicate_not_yet_in_db(
-    db: Database, cfg: Config
-) -> None:
-    first = _card("kjøkken")
-    candidate = _card("kjokken")
-
-    decision = check_card(candidate, db, cfg, batch_candidates=[(first.id, first.word)])
-
-    assert decision.decision == "review"
-    assert decision.matches[0].existing_card_id == first.id
-
-
-def test_no_batch_candidates_defaults_to_new(db: Database, cfg: Config) -> None:
-    decision = check_card(_card("bil"), db, cfg, batch_candidates=None)
     assert decision.decision == "new"
 
 

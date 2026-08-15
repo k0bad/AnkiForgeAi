@@ -8,17 +8,18 @@
 
 from __future__ import annotations
 
+from ..anki.connect import AnkiConnect
 from ..config import Config
 from ..db import Database
 from ..models import Card, Status
-from ..pipeline import _record, enrich_and_generate_media
+from ..pipeline import _record, delete_card_record, enrich_and_generate_media
 
 EDITABLE_FIELDS = ("word", "translation", "example", "example_translation")
 
 
-def _require_cards(card_ids: list[str], db: Database) -> list[Card]:
+def _require_cards(card_ids: list[int], db: Database) -> list[Card]:
     cards: list[Card] = []
-    missing: list[str] = []
+    missing: list[int] = []
     for card_id in card_ids:
         card = db.get_by_id(card_id)
         if card is None:
@@ -26,11 +27,11 @@ def _require_cards(card_ids: list[str], db: Database) -> list[Card]:
         else:
             cards.append(card)
     if missing:
-        raise ValueError(f"Карточки не найдены: {', '.join(missing)}")
+        raise ValueError(f"Карточки не найдены: {', '.join(str(m) for m in missing)}")
     return cards
 
 
-async def accept_cards(card_ids: list[str], db: Database, cfg: Config) -> dict[str, str]:
+async def accept_cards(card_ids: list[int], db: Database, cfg: Config) -> dict[int, str]:
     """Принять карточки: enrich + media, затем approved (или review, если
     enrichment оказался неполным). Возвращает {card_id: итоговый статус}."""
     cards = _require_cards(card_ids, db)
@@ -38,8 +39,9 @@ async def accept_cards(card_ids: list[str], db: Database, cfg: Config) -> dict[s
         return {}
 
     _, incomplete_ids = await enrich_and_generate_media(cards, db, cfg)
-    results: dict[str, str] = {}
+    results: dict[int, str] = {}
     for card in cards:
+        assert card.id is not None
         card.status = Status.REVIEW if card.id in incomplete_ids else Status.APPROVED
         db.update_card(card)
         _record(db, "info", "review_finalized", card.id, status=card.status.value)
@@ -47,7 +49,26 @@ async def accept_cards(card_ids: list[str], db: Database, cfg: Config) -> dict[s
     return results
 
 
-def _set_status(card_ids: list[str], status: Status, action: str, db: Database) -> list[str]:
+async def delete_cards(card_ids: list[int], db: Database, anki: AnkiConnect) -> list[int]:
+    """Удалить карточки насовсем: из Anki (если уже запушены — вместе с их
+    историей повторений/интервалов там!), из локальной БД, освободить номер
+    для переиспользования следующей новой карточкой.
+
+    Anki-вызов идёт первым — если deleteNotes упадёт, локальная запись о
+    карточке останется нетронутой, а не будет молча стёрта раньше времени.
+    """
+    cards = _require_cards(card_ids, db)
+    deleted: list[int] = []
+    for card in cards:
+        assert card.id is not None
+        if card.anki_note_id is not None:
+            await anki.delete_notes([card.anki_note_id])
+        delete_card_record(db, card, action="delete")
+        deleted.append(card.id)
+    return deleted
+
+
+def _set_status(card_ids: list[int], status: Status, action: str, db: Database) -> list[int]:
     _require_cards(card_ids, db)
     for card_id in card_ids:
         db.update_status(card_id, status)
@@ -55,20 +76,20 @@ def _set_status(card_ids: list[str], status: Status, action: str, db: Database) 
     return card_ids
 
 
-def skip_cards(card_ids: list[str], db: Database) -> list[str]:
+def skip_cards(card_ids: list[int], db: Database) -> list[int]:
     return _set_status(card_ids, Status.SKIPPED, "review_skip", db)
 
 
-def suspend_cards(card_ids: list[str], db: Database) -> list[str]:
+def suspend_cards(card_ids: list[int], db: Database) -> list[int]:
     return _set_status(card_ids, Status.SUSPENDED, "review_suspend", db)
 
 
-def resume_cards(card_ids: list[str], db: Database) -> list[str]:
+def resume_cards(card_ids: list[int], db: Database) -> list[int]:
     """Вернуть suspended/skipped карточки в review (передумали)."""
     return _set_status(card_ids, Status.REVIEW, "review_resume", db)
 
 
-def edit_card(card_id: str, updates: dict[str, str], db: Database) -> Card:
+def edit_card(card_id: int, updates: dict[str, str], db: Database) -> Card:
     _require_cards([card_id], db)
     bad_fields = [k for k in updates if k not in EDITABLE_FIELDS]
     if bad_fields:

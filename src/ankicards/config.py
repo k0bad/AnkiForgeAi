@@ -140,23 +140,33 @@ class TagsConfig(BaseModel):
 
 
 NoteFieldSlot = Literal[
-    "front_title", "front_audio", "front_image", "title_meta", "section", "tag", "hidden"
+    "front_title",
+    "front_sub",
+    "front_audio",
+    "front_image",
+    "pos",
+    "translation",
+    "example",
+    "forms",
+    "level",
+    "topic",
+    "id",
 ]
 
 
 class NoteFieldDef(BaseModel):
     """Одно поле Anki Note Type: источник данных (FIELD_RESOLVERS в anki/notetype.py)
-    и место в шаблоне карточки (slot)."""
+    и место в шаблоне карточки (slot). front_title/front_sub/pos/front_audio/front_image
+    рендерятся и на фронте, и в шапке бэка — оба билдера шаблона читают их по слоту
+    напрямую (front_template()/_build_header() в anki/notetype.py)."""
 
     name: str
     source: str
-    slot: NoteFieldSlot = "section"
-    optional: bool = False  # section: обернуть в {{#Field}}...{{/Field}} на бэке
+    slot: NoteFieldSlot = "translation"
+    optional: bool = False  # guarded-поля: {{#Field}}...{{/Field}}
     label_key: str | None = None  # ключ в back_labels/EN_BACK_LABELS; по умолчанию name.lower()
     css_class: str | None = None  # по умолчанию name.lower()
-    # title_meta/front_title поле: повторить в шапке бэка (см. _build_back_template)
-    recap_on_back: bool = False
-    # section-поле: не открывать свою секцию, вложить в div предыдущего section-поля
+    # example-поле: не открывать свою пару, вложить в пару предыдущего example-поля
     # (например ExampleTranslation внутрь Example — один блок "пример + перевод")
     nest_in_previous: bool = False
 
