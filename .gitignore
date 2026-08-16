@@ -2,6 +2,9 @@
 .env
 *.key
 
+# Локальный конфиг (не коммитить — создаётся из config.yaml.example)
+config.yaml
+
 # Python
 __pycache__/
 *.py[cod]
