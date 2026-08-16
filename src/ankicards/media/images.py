@@ -205,23 +205,38 @@ async def download_image(url: str, out_path: Path, cfg: Config) -> None:
         rgb.save(out_path, format="JPEG", quality=85, optimize=True)
 
 
-async def attach_image(card: Card, cfg: Config, auto_pick: bool = False) -> Card:
-    """Найти + скачать + обновить card.image."""
+async def find_candidates(card: Card, cfg: Config) -> list[dict[str, str]]:
+    """Найти кандидатов на картинку для карточки, ничего не скачивая.
+
+    Общая первая половина attach_image() — вынесена отдельно, чтобы review/interactive.py
+    могло показать варианты человеку и передать выбор в save_image(), не делая
+    повторный поисковый запрос (issue #36: до этого выбор всегда был неявным —
+    первый результат без права человека увидеть альтернативы).
+    """
     if not cfg.images.enabled:
-        return card
+        return []
     if card.pos.value not in cfg.images.only_for_pos:
-        return card
+        return []
 
     query = card.image_query or card.word
     results = await search_images(query, cfg=cfg, count=cfg.images.per_page)
     if not results:
         logger.warning("images.search_empty", card_id=card.id, word=card.word, query=query)
-        return card
-    if not auto_pick:
-        return card
+    return results
 
+
+async def save_image(card: Card, result: dict[str, str], cfg: Config) -> Card:
+    """Скачать выбранный (вручную или автоматически) результат и обновить card.image."""
     filename = f"{card.id}.jpg"
     out_path = cfg.paths.images_dir / filename
-    await download_image(results[0]["url"], out_path, cfg)
+    await download_image(result["url"], out_path, cfg)
     card.image = filename
     return card
+
+
+async def attach_image(card: Card, cfg: Config, auto_pick: bool = False) -> Card:
+    """Найти + скачать первый результат + обновить card.image (полностью автоматически)."""
+    results = await find_candidates(card, cfg)
+    if not results or not auto_pick:
+        return card
+    return await save_image(card, results[0], cfg)

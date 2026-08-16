@@ -341,3 +341,85 @@ async def test_attach_image_falls_back_to_word_without_image_query(
     await images_module.attach_image(card, cfg, auto_pick=True)
 
     assert captured["query"] == "hus"
+
+
+# ───────────── find_candidates / save_image (issue #36: review_pending даёт человеку
+# выбрать картинку из кандидатов, а не молча берёт первый результат) ─────────────
+
+
+async def test_find_candidates_returns_search_results_without_downloading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    results = [{"url": "https://img/1.jpg", "author": "Anna"}]
+
+    async def fake_search(query: str, cfg: Config, count: int) -> list[dict[str, str]]:
+        return results
+
+    monkeypatch.setattr(images_module, "search_images", fake_search)
+    cfg = _make_config()
+    card = Card(word="hus", pos=POS.NOUN, translation="дом", image_query="house")
+
+    candidates = await images_module.find_candidates(card, cfg)
+
+    assert candidates == results
+
+
+async def test_find_candidates_skips_search_when_images_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    async def fake_search(query: str, cfg: Config, count: int) -> list[dict[str, str]]:
+        nonlocal called
+        called = True
+        return []
+
+    monkeypatch.setattr(images_module, "search_images", fake_search)
+    cfg = _make_config(enabled=False)
+    card = Card(word="hus", pos=POS.NOUN, translation="дом")
+
+    candidates = await images_module.find_candidates(card, cfg)
+
+    assert candidates == []
+    assert called is False
+
+
+async def test_find_candidates_skips_search_for_non_matching_pos(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    async def fake_search(query: str, cfg: Config, count: int) -> list[dict[str, str]]:
+        nonlocal called
+        called = True
+        return []
+
+    monkeypatch.setattr(images_module, "search_images", fake_search)
+    cfg = _make_config()  # only_for_pos по умолчанию [noun]
+    card = Card(word="snakke", pos=POS.VERB, translation="говорить")
+
+    candidates = await images_module.find_candidates(card, cfg)
+
+    assert candidates == []
+    assert called is False
+
+
+async def test_save_image_downloads_chosen_result_and_sets_filename(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    downloaded: dict[str, Any] = {}
+
+    async def fake_download(url: str, out_path: Path, cfg: Config) -> None:
+        downloaded["url"] = url
+        downloaded["path"] = out_path
+
+    monkeypatch.setattr(images_module, "download_image", fake_download)
+    cfg = _make_config()
+    card = Card(id=7, word="hus", pos=POS.NOUN, translation="дом")
+
+    result = {"url": "https://img/2.jpg", "author": "Bob"}
+    updated = await images_module.save_image(card, result, cfg)
+
+    assert updated.image == "7.jpg"
+    assert downloaded["url"] == "https://img/2.jpg"
+    assert downloaded["path"] == cfg.paths.images_dir / "7.jpg"

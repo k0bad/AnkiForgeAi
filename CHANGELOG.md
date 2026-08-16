@@ -5,6 +5,7 @@ All notable changes to AnkiForgeAI will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Interactive `review` now lets a human pick the card's image instead of always auto-attaching the first search result (closes #36): after batch enrichment finishes for accepted cards, `review/interactive.py` shows up to `images.per_page` candidates (author + link) per eligible card and asks which to use (default = the same first result auto-pick would have chosen, so accepting is still one keypress) or to skip entirely. `media/images.py`'s `attach_image()` is split into `find_candidates()` (search only) and `save_image()` (download the chosen one) so the picker reuses the same search call instead of querying providers twice. Only applies to the interactive terminal flow — `enrich_and_generate_media()`/`accept_cards()` gained an `auto_pick_images` flag (default `True`) so the automatic ingest pipeline and the non-interactive `review accept` (AI-agent) path keep today's auto-pick-first behavior unchanged.
 - `ankiforgeai setup` now syncs `.claude/skills/ankiforgeai/SKILL.md`'s trigger-phrase examples to the chosen `ui_language` (closes #25): `ru` keeps the Russian examples ("сгенерируй слов", ...), `en` switches to English equivalents ("generate words", ...). Only rewrites the trailing example clause of the frontmatter `description` line — idempotent, no-op if SKILL.md isn't present (e.g. pip-installed outside a checkout of this repo).
 
 ### Added

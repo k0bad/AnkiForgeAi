@@ -31,14 +31,22 @@ def _require_cards(card_ids: list[int], db: Database) -> list[Card]:
     return cards
 
 
-async def accept_cards(card_ids: list[int], db: Database, cfg: Config) -> dict[int, str]:
+async def accept_cards(
+    card_ids: list[int], db: Database, cfg: Config, auto_pick_images: bool = True
+) -> dict[int, str]:
     """Принять карточки: enrich + media, затем approved (или review, если
-    enrichment оказался неполным). Возвращает {card_id: итоговый статус}."""
+    enrichment оказался неполным). Возвращает {card_id: итоговый статус}.
+
+    auto_pick_images=False — см. enrich_and_generate_media: используется
+    review_pending(), которое само подбирает картинку с человеком после этого вызова.
+    """
     cards = _require_cards(card_ids, db)
     if not cards:
         return {}
 
-    _, incomplete_ids = await enrich_and_generate_media(cards, db, cfg)
+    _, incomplete_ids = await enrich_and_generate_media(
+        cards, db, cfg, auto_pick_images=auto_pick_images
+    )
     results: dict[int, str] = {}
     for card in cards:
         assert card.id is not None

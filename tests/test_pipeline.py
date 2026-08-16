@@ -207,6 +207,34 @@ async def test_translation_missing_image_query_logs_warning_but_stays_approved(
     assert rows[0]["card_id"] == card.id
 
 
+async def test_auto_pick_images_false_skips_image_stage(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """auto_pick_images=False (issue #36): review_pending подбирает картинку само-
+    стоятельно после этого вызова (через find_candidates/save_image), так что здесь
+    attach_image вообще не должен вызываться — ни поиска, ни автовыбора первого."""
+    calls: list[Card] = []
+
+    async def _spy_attach(card: Card, cfg: Config, auto_pick: bool = False) -> Card:
+        calls.append(card)
+        card.image = "should-not-happen.jpg"
+        return card
+
+    monkeypatch.setattr(pipeline, "attach_image", _spy_attach)
+
+    cfg = _make_config(tmp_path, grammar=False, examples=False, pronunciation=False)
+    cfg.images.enabled = True
+    card = _card("hus")
+    db.insert_card(card)
+
+    await pipeline.enrich_and_generate_media(
+        [card], db=db, cfg=cfg, auto_enrich=False, auto_media=True, auto_pick_images=False
+    )
+
+    assert calls == []
+    assert card.image is None
+
+
 async def test_translation_image_query_missing_not_logged_when_images_disabled(
     tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
