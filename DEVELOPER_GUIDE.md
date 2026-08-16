@@ -12,13 +12,16 @@
 cd path/to/AnkiForgeAI
 uv pip install -e ".[dev]"
 
-# CLI
-ankicards ingest topic "еда" --count 10 --level A2   # генерация слов
-ankicards ingest url https://...                       # извлечение из страницы
-ankicards review                                        # интерактивный ревью (только в TTY)
-ankicards push                                          # отправка в Anki
-ankicards sync                                          # синхронизация Anki → кэш
-ankicards stats                                         # статистика
+# CLI (бинарь называется ankiforgeai, import-пакет — ankicards)
+ankiforgeai ingest topic "еда" --count 10 --level A2   # генерация слов
+ankiforgeai ingest url https://...                       # извлечение из страницы
+ankiforgeai review                                        # интерактивный ревью (только в TTY)
+ankiforgeai push                                          # отправка в Anki
+ankiforgeai sync                                          # синхронизация Anki → кэш
+ankiforgeai stats                                         # статистика
+ankiforgeai doctor                                        # сверка enrich/images-тумблеров с данными карточек
+ankiforgeai delete <id> [<id> ...]                        # безвозвратное удаление, номер освобождается
+ankiforgeai migrate-ids                                   # разовая миграция UUID → последовательные ID
 
 # Тесты + линтеры
 pytest tests/ -v
@@ -46,6 +49,9 @@ src/ankicards/
 ├── cli.py             # Typer CLI — все команды
 ├── llm.py             # LLM-клиент (OpenRouter/Anthropic), load_prompt()
 ├── dedupe.py          # Exact + fuzzy совпадения (rapidfuzz)
+├── doctor.py          # find_inconsistencies() — enrich/images тумблеры vs данные карточек
+├── migrate_ids.py      # разовая миграция card.id UUID → последовательные int (ankiforgeai migrate-ids)
+├── setup_wizard.py     # интерактивный мастер `ankiforgeai setup` → пишет config.yaml
 ├── log.py             # structlog (JSON + human)
 ├── ingest/
 │   ├── topic.py       # Генерация слов по теме через LLM
@@ -67,7 +73,8 @@ src/ankicards/
 │   ├── webhook.py       # generic POST JSON бэкенд (n8n/Hermes/Zapier/…), format: text|json
 │   └── __init__.py      # dispatch() — фан-аут по cfg.notifications, канал за каналом
 └── review/
-    └── interactive.py # rich + questionary UI (только TTY)
+    ├── interactive.py # rich + questionary UI (только TTY)
+    └── actions.py      # non-interactive accept/skip/suspend/resume/edit/delete (для AI-агента)
 
 scripts/
 ├── daily_topic.py     # Ежедневный автоцикл: generate → dedupe (AI-адъюдикация) → push → notify
@@ -304,15 +311,17 @@ pytest tests/test_language.py -v
 |------|----------------|---------|---------------|
 | Норвежский (nb) | род (m/f/n) + 4 формы числа/определённости | 4 времени | 3 формы + сравнение |
 | Немецкий (de) | род + 4 падежа + мн.ч | 5 форм лица + 2 времени | 3 степени |
+| Английский (en) | только число (singular/plural) | 5 форм (base/past/participle/-ing/3rd person) | 3 степени сравнения |
+| Испанский (es) | род + число | 12 форм (5 лиц наст. вр. + претерит + имперфект + futuro + participio + gerundio) | 4 формы (род × число) |
 | Французский* | род (m/f) + число | 6 форм лица + времена | род + число + сравнение |
-| Английский* | только число | 3-4 формы | сравнение |
 | Японский* | нет рода/числа | вежливые/простые формы | い/な прилагательные |
 
-*\*Примеры — можно реализовать через language.yaml без правки кода.*
+nb/de/en/es — реализованные профили (`languages/{code}/`). \*Французский и японский — гипотетические
+примеры того, что можно добавить через `language.yaml` без правки кода, языковых профилей для них пока нет.
 
 ---
 
-## 5. Как работает доставка в Telegram
+## 5. Как работает доставка уведомлений (webhook → Telegram и др.)
 
 Уведомления — pluggable слой `src/ankicards/notify/` (см. также `notify/webhook.py`):
 каналы описаны в `config.yaml -> notifications:`, каждый — `{type, enabled, url, format}`.
@@ -354,7 +363,8 @@ n8n шлёт напрямую через Telegram Bot API — надёжнее, 
 
 ```sql
 CREATE TABLE cards (
-    id              TEXT PRIMARY KEY,        -- UUID
+    id              INTEGER PRIMARY KEY,     -- последовательный, переиспользуемый номер
+                                              -- (был UUID до migrate_ids.py, см. §10)
     word            TEXT NOT NULL,           -- основная форма (lemma)
     pronunciation   TEXT,                    -- транскрипция
     translation     TEXT NOT NULL,           -- перевод
@@ -377,7 +387,7 @@ CREATE TABLE audit_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp   TEXT NOT NULL,               -- UTC ISO
     action      TEXT NOT NULL,               -- create/skip_duplicate/push/review_needed/review_accept/...
-    card_id     TEXT,                        -- FK → cards.id (может быть NULL)
+    card_id     INTEGER,                     -- FK → cards.id (может быть NULL)
     details     TEXT,                        -- JSON с деталями операции
     run_id      TEXT                         -- FK к structlog run_id того же вызова (см. ниже)
 );
@@ -426,7 +436,9 @@ CREATE TABLE anki_cache (
 5. **Все операции с БД — в транзакциях** через `db.connect()`.
 6. **Имена медиа-файлов детерминированы:** `{card.id}_nb.mp3`, `{card.id}.jpg`.
 7. **Source of truth = Anki**, не SQLite. SQLite — staging + audit + кэш.
-8. **Только bokmål** (на данный момент). Nynorsk можно добавить как отдельный `language.yaml`.
+8. **Норвежский — только Bokmål (`nb`)**. Остальные языковые профили (`de`/`en`/`es`) полностью
+   реализованы и независимы друг от друга; Nynorsk можно добавить так же — отдельным `language.yaml`
+   с кодом `nn`.
 
 ---
 
@@ -434,9 +446,9 @@ CREATE TABLE anki_cache (
 
 | Симптом | Причина | Фикс |
 |---------|---------|------|
-| `ankicards push` → ConnectTimeout | Комп выключен / Anki не запущен / Tailscale не подключён | Включить комп, открыть Anki, проверить `curl http://<tailscale-anki-ip>:8765` |
+| `ankiforgeai push` → ConnectTimeout | Комп выключен / Anki не запущен / Tailscale не подключён | Включить комп, открыть Anki, проверить `curl http://<tailscale-anki-ip>:8765` |
 | Cron `exit code 1` | LLM API недоступен / n8n не отвечает | Проверить `curl http://<n8n-host>:5678/healthz` |
-| `review` не работает в моём терминале | `questionary` требует TTY | Запустить `ankicards review` в интерактивном терминале пользователя |
+| `review` не работает в моём терминале | `questionary` требует TTY | Запустить `ankiforgeai review` в интерактивном терминале пользователя |
 | Уведомление в Telegram не пришло | n8n workflow упал | Проверить executions: `curl http://<n8n-host>:5678/api/v1/executions?workflowId=<workflow-id>` |
 | `get_language('xx')` → FileNotFoundError | Нет `languages/xx/language.yaml` | Создать по образцу |
 | `load_prompt` не находит промпт в языке | Промпт не скопирован в `languages/{code}/prompts/` | `cp prompts/*.md languages/{code}/prompts/` |
@@ -477,7 +489,14 @@ curl -X POST http://<n8n-host>:5678/webhook/ankicards-notify -H 'Content-Type: a
 ## 10. План на будущее
 
 - [x] Добавить `language: nb` в `config.yaml` (сейчас — дефолт `get_language()`)
+- [x] Языковые профили `de`/`en`/`es` в дополнение к `nb` (все четыре — полные, `languages/{code}/`)
 - [ ] `ankiforgeai config set language.de` (CLI-команда для смены языка без ручного редактирования `config.yaml`)
+- [x] AI-адъюдикация дедупа (`dedupe.ai_adjudication`, `dedupe.judge_review`) — LLM решает SAME/DIFFERENT
+      для нечётких совпадений вместо автоматического ухода в ревью
+- [x] Pluggable-каналы уведомлений (`notify/`, generic webhook: n8n/Zapier/Hermes/…)
+- [x] Fallback-цепочка провайдеров картинок (`images.fallback_providers`)
+- [x] Интерактивный выбор картинки в `review` вместо автовыбора первого результата (issue #36)
+- [x] Последовательные переиспользуемые `card.id` вместо UUID + команда `delete` (см. §6, `migrate_ids.py`)
 - [ ] Поддержка `parse_mode: MarkdownV2` с экранированием спецсимволов (`notify/webhook.py` сейчас рендерит под legacy `parse_mode: Markdown`)
 - [ ] Nynorsk как отдельный `language.yaml` (`nn`)
 - [x] CI/CD (GitHub Actions: ruff + mypy + pytest)

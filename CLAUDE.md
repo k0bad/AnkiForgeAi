@@ -21,6 +21,8 @@ ankiforgeai review
 ankiforgeai push
 ankiforgeai sync
 ankiforgeai stats
+ankiforgeai doctor          # consistency check: enrich/images config toggles vs actual card data
+ankiforgeai delete <id> [<id> ...]  # permanently delete cards, frees their id for reuse (irreversible)
 ankiforgeai setup           # interactive wizard: pick language, provider, Anki URL → writes config.yaml
 
 # Setup (run after install; safe to re-run)

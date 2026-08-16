@@ -140,6 +140,12 @@ ankiforgeai sync
 
 # View stats
 ankiforgeai stats
+
+# Consistency check: enrich/images config toggles vs actual card data
+ankiforgeai doctor
+
+# Delete cards permanently (frees their id for reuse; irreversible if already pushed)
+ankiforgeai delete <id> [<id> ...]
 ```
 
 ## Automated Daily Cycle
@@ -176,6 +182,8 @@ src/ankicards/
 ├── pipeline.py            # Stage orchestration
 ├── llm.py                 # LLM client (OpenRouter/Anthropic)
 ├── dedupe.py              # Exact + fuzzy matching (rapidfuzz)
+├── doctor.py              # Consistency check: enrich/images config vs card data
+├── migrate_ids.py         # One-time UUID → sequential int id migration
 ├── ingest/
 │   ├── url.py             # trafilatura + LLM
 │   └── topic.py           # Topic-based generation
@@ -195,7 +203,8 @@ src/ankicards/
 │   ├── base.py            # Notifier protocol
 │   └── webhook.py         # Generic webhook backend (n8n, Zapier, ...)
 └── review/
-    └── interactive.py     # Rich + questionary UI
+    ├── interactive.py     # Rich + questionary UI
+    └── actions.py         # Non-interactive accept/skip/suspend/resume/edit/delete
 
 languages/                 # Language profiles (YAML + prompts)
 prompts/                   # Default prompts
