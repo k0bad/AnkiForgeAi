@@ -205,6 +205,11 @@ async def test_accept_cards_auto_pick_images_false_does_not_attach_image(
 
     cfg = _make_config(tmp_path)
     card = _card("hus")
+    # translation и image_query уже заполнены — иначе _needs_translation_stage()
+    # (issue #47) сочтёт карточку image-eligible-но-без-gloss и дернёт настоящий
+    # enrich_translation()/call_text() без мока, что не имеет отношения к тому,
+    # что проверяет этот тест (auto_pick_images/attach_image).
+    card.image_query = "house"
     db.insert_card(card)
 
     results = await actions.accept_cards([card.id], db, cfg, auto_pick_images=False)
