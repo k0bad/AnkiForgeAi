@@ -10,7 +10,10 @@
 from __future__ import annotations
 
 from ..llm import call_text, load_prompt
+from ..log import get_logger
 from ..models import Card
+
+logger = get_logger(__name__)
 
 
 def _parse_translation(raw: str) -> tuple[str, str | None]:
@@ -48,6 +51,14 @@ async def enrich_translation(card: Card) -> Card:
     prompt = load_prompt("translation", word=card.word, pos=card.pos.value)
     raw = await call_text(prompt)
     ru, en = _parse_translation(raw)
+    if en and " / " in en:
+        # Модель иногда всё же сваливает EN: в тот же "sense1 / sense2" формат,
+        # что RU: (см. пример омонимов ниже) — вопреки инструкции промпта дать
+        # ОДНУ расшифрованную фразу. Составной запрос бьёт по случайной части
+        # смысла в провайдере картинок, так что берём только первый вариант вместо
+        # того, чтобы отправлять его как есть (issue #50, найдено на "lønn").
+        logger.warning("translation.image_query_multi_sense", word=card.word, raw_en=en)
+        en = en.split(" / ")[0].strip()
     if ru and not card.translation:
         card.translation = ru
     if en:

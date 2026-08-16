@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+import structlog
 
 from ankicards.enrich import translation as translation_module
 from ankicards.models import POS, Card
@@ -63,6 +64,51 @@ async def test_unstructured_response_falls_back_to_plain_translation(
 
     assert card.translation == "дом / хата"
     assert card.image_query is None
+
+
+async def test_multi_sense_en_line_takes_first_variant_and_logs_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """issue #50: модель иногда сваливает EN: в тот же "sense1 / sense2" формат,
+    что RU: (найдено на "lønn" — клён/зарплата, оба смысла сразу). Составной
+    запрос бьёт по случайной части смысла в провайдере картинок, так что берём
+    только первый вариант и логируем деградацию, а не отправляем как есть."""
+    monkeypatch.setattr(translation_module, "load_prompt", lambda name, **kw: "prompt")
+
+    async def _fake_call_text(prompt: str) -> str:
+        return "RU: клён / зарплата\nEN: maple tree leaves / salary paycheck money"
+
+    monkeypatch.setattr(translation_module, "call_text", _fake_call_text)
+
+    with structlog.testing.capture_logs() as cap:
+        card = await translation_module.enrich_translation(_card())
+
+    assert card.translation == "клён / зарплата"  # RU: не трогаем, там "/" легитимен
+    assert card.image_query == "maple tree leaves"
+
+    matches = [e for e in cap if e.get("event") == "translation.image_query_multi_sense"]
+    assert len(matches) == 1
+    assert matches[0]["log_level"] == "warning"
+    assert matches[0]["word"] == "hus"
+
+
+async def test_single_sense_en_line_with_no_slash_is_untouched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Контроль: обычная (не составная) EN-фраза не должна ничего логировать
+    или обрезаться — только явный " / " внутри EN: считается деградацией."""
+    monkeypatch.setattr(translation_module, "load_prompt", lambda name, **kw: "prompt")
+
+    async def _fake_call_text(prompt: str) -> str:
+        return "RU: пружина\nEN: metal coil spring"
+
+    monkeypatch.setattr(translation_module, "call_text", _fake_call_text)
+
+    with structlog.testing.capture_logs() as cap:
+        card = await translation_module.enrich_translation(_card())
+
+    assert card.image_query == "metal coil spring"
+    assert [e for e in cap if e.get("event") == "translation.image_query_multi_sense"] == []
 
 
 async def test_existing_translation_still_backfills_image_query(
