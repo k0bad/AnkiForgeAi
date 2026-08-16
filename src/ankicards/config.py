@@ -234,7 +234,7 @@ class Config(BaseModel):
 
     def resolve_paths(self) -> None:
         """Сделать относительные пути абсолютными от корня проекта."""
-        for field in self.paths.model_fields:
+        for field in type(self.paths).model_fields:
             value = getattr(self.paths, field)
             if not value.is_absolute():
                 setattr(self.paths, field, PROJECT_ROOT / value)

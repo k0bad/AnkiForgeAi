@@ -14,7 +14,7 @@ import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import structlog
@@ -255,7 +255,7 @@ class Database:
                 "INSERT INTO audit_log (timestamp, action, card_id, details, run_id) "
                 "VALUES (?, ?, ?, ?, ?)",
                 (
-                    datetime.utcnow().isoformat(timespec="seconds"),
+                    datetime.now(UTC).isoformat(timespec="seconds"),
                     action,
                     card_id,
                     json.dumps(details, ensure_ascii=False),
@@ -280,7 +280,7 @@ class Database:
                     word,
                     json.dumps(fields, ensure_ascii=False),
                     json.dumps(tags),
-                    datetime.utcnow().isoformat(timespec="seconds"),
+                    datetime.now(UTC).isoformat(timespec="seconds"),
                 ),
             )
 
