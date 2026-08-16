@@ -148,6 +148,16 @@ ankiforgeai doctor
 ankiforgeai delete <id> [<id> ...]
 ```
 
+## Using with Claude Code
+
+This repo ships two things: the `ankiforgeai` CLI above (what `pip install ankiforgeai` gets you),
+and a [Claude Code Agent Skill](.claude/skills/ankiforgeai/SKILL.md) checked into git alongside it.
+When [Claude Code](https://claude.com/claude-code) works inside this directory it auto-loads
+`SKILL.md` and drives the same CLI non-interactively — `--json` output, `review accept/skip/suspend/
+resume/edit <id>` by card id instead of the TTY prompts `ankiforgeai review` needs a human terminal
+for. That's what powers the primary workflow: ask in chat ("сгенерируй 20 слов по теме одежда A2"),
+Claude runs the CLI and reports back. The skill is git-only — it isn't part of the PyPI package.
+
 ## Automated Daily Cycle
 
 ```bash

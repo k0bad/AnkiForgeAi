@@ -87,7 +87,16 @@ scripts/
 languages/{code}/
 ├── language.yaml      # Единственный источник истины для языка (см. секцию 4)
 └── prompts/           # Языковые промпты (переопределяют prompts/)
+
+.claude/skills/ankiforgeai/
+└── SKILL.md            # Контракт для AI-агента: --json/review по id вместо TTY-промптов
+                         # (в git, но НЕ публикуется на PyPI; `ankiforgeai setup` синхронизирует
+                         # её trigger-phrase примеры под выбранный ui_language, см. §10)
 ```
+
+Проект — одновременно обычный PyPI CLI-пакет (`ankiforgeai`, что видит `pip install`) и Claude
+Code Agent Skill в том же репозитории. Второе не упаковывается и не публикуется — это git-only
+слой поверх того же CLI для AI-агента, описанный в SKILL.md выше и в «Primary workflow» CLAUDE.md.
 
 ---
 
