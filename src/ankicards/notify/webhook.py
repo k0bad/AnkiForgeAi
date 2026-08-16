@@ -46,7 +46,7 @@ def format_report(report: dict[str, Any]) -> str:
     """Отрендерить структурированный отчёт в Telegram-flavored markdown."""
     label = report.get("label") or report["topic"]
     lines = [
-        "📚 AnkiCards · ежедневная генерация",
+        "📚 AnkiForgeAI · ежедневная генерация",
         "",
         f"🗓️ День: {report['day']} | Тема: {label} ({report['topic']}) | "
         f"{report['count']} слов | {report['level']}",

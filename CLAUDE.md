@@ -76,7 +76,7 @@ Review can interrupt at any stage — user sees pending/review cards and accepts
 | `pipeline.py` | Orchestrator `run_ingest_pipeline()` and `push_approved()`; shared `enrich_and_generate_media()` also used by `review/interactive.py` accept path |
 | `dedupe.py` | `check_card()` → fuzzy match via rapidfuzz; `judge_review()` → LLM adjudicates ambiguous matches; thresholds in `config.yaml` |
 | `anki/connect.py` | Async HTTP client for AnkiConnect API (port 8765) |
-| `anki/notetype.py` | NorskCard note type definition: 12 fields, HTML/CSS templates |
+| `anki/notetype.py` | LanguageCard note type definition: 12 fields, HTML/CSS templates |
 | `ingest/topic.py` | Calls Claude with `prompts/topic_words.md` → `list[Card]` |
 | `enrich/grammar.py` | Calls Claude with `prompts/grammar_forms.md` → populates `card.forms` |
 | `media/tts.py` | edge-tts → `{card.id}_nb.mp3` in `media/audio/` |

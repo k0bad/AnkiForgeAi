@@ -447,7 +447,7 @@ def stats(as_json: bool = typer.Option(False, "--json", help="Машиночит
         print(json.dumps({**counts, "anki_cache": anki_cached}, ensure_ascii=False, indent=2))
         return
 
-    table = Table(title="AnkiCards — статистика")
+    table = Table(title="AnkiForgeAI — статистика")
     table.add_column("Статус", style="cyan")
     table.add_column("Количество", justify="right")
 
