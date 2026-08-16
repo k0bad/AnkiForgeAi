@@ -33,7 +33,8 @@ See [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for the full architecture reference
 ## Conventions
 
 - `from __future__ import annotations` in every file
-- Async for all I/O
+- Async for HTTP/TTS/LLM I/O (`anki/connect.py`, `media/tts.py`, `llm.py`) — `db.py` uses synchronous
+  `sqlite3` directly, called blocking from async code (local DB, not worth a thread pool)
 - Pydantic v2 for config and models
 - All DB operations in transactions via `Database.connect()`
 - Never hardcode language — use `get_language()` + `language.yaml`

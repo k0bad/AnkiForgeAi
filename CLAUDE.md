@@ -113,7 +113,9 @@ Key settings to know:
 ## Code conventions
 
 - `from __future__ import annotations` in every file.
-- Async for all I/O (HTTP, edge-tts, DB). Pipeline is fully async.
+- Async for HTTP/TTS/LLM I/O (`anki/connect.py`, `media/tts.py`, `llm.py`). `db.py` uses synchronous
+  `sqlite3` directly, called blocking from async code — not a genuine async DB layer despite the
+  pipeline functions calling it being `async def`.
 - Pydantic v2 for models and config.
 - `structlog` for logging (JSON + human-readable).
 - `ruff` line-length 100, selects E/F/I/N/UP/B/SIM.
