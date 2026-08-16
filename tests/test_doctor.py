@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from ankicards.anki.sync import sync_anki_to_cache
 from ankicards.config import (
     AnkiConfig,
     Config,
@@ -219,3 +220,40 @@ def test_fully_enriched_card_has_no_problems(tmp_path: Path, db: Database) -> No
     )
 
     assert find_inconsistencies([card], cfg) == []
+
+
+class _FakeAnkiSync:
+    """Минимальный двойник AnkiConnect — только то, что нужно sync_anki_to_cache."""
+
+    async def find_notes(self, query: str) -> list[int]:
+        return [1]
+
+    async def notes_info(self, note_ids: list[int]) -> list[dict]:
+        return [{"noteId": 1, "fields": {"Word": {"value": "hus"}}, "tags": []}]
+
+
+async def test_corruption_still_caught_after_anki_sync_populates_cache(
+    tmp_path: Path, db: Database
+) -> None:
+    """issue #28 checklist: "manually corrupt one card ... confirm doctor flags it"
+    против *live-synced* БД, не просто bare-фикстуры. find_inconsistencies() читает
+    только переданный ей list[Card] (из таблицы cards) — anki_cache (её заполняет
+    `sync`) на её проверки не влияет вообще; это и проверяем явно, а не оставляем
+    неявным допущением: синкаем в anki_cache "здоровую" заметку, при этом отдельно
+    корраптим карточку в cards (roundtrip через настоящий SQLite, как это делает
+    сама CLI-команда `doctor` через db.get_by_status), и убеждаемся, что doctor
+    её всё равно ловит."""
+    enrich = EnrichConfig(grammar=True, examples=False, pronunciation=False)
+    cfg = _make_config(tmp_path, enrich=enrich)
+
+    corrupted = _card(db, word="bil", status=Status.PUSHED, forms=None, anki_note_id=None)
+
+    synced = await sync_anki_to_cache(db, _FakeAnkiSync(), cfg)  # type: ignore[arg-type]
+    assert synced == 1
+    assert db.all_anki_words() == [(1, "hus")]
+
+    cards = db.get_by_status(Status.APPROVED) + db.get_by_status(Status.PUSHED)
+    problems = find_inconsistencies(cards, cfg)
+
+    checks = {(p.card_id, p.check) for p in problems}
+    assert checks == {(corrupted.id, "enrich.grammar"), (corrupted.id, "anki_note_id")}

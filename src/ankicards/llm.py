@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
+from typing import Any, cast
 
 from tenacity import RetryCallState, retry, retry_if_exception, stop_after_attempt, wait_exponential
 
@@ -21,9 +21,22 @@ from .log import get_logger
 logger = get_logger(__name__)
 
 
+class EmptyCompletionError(Exception):
+    """Провайдер вернул пустой completion (content=None/"" при HTTP 200).
+
+    Раньше это тихо превращалось в "" и всплывало только позже как
+    ValueError('LLM вернул невалидный JSON') из _parse_json — уже вне
+    retry-обёртки _call_openai/_call_anthropic, да ещё и ValueError
+    сознательно исключён из ретраев в _is_transient. На практике пустой
+    completion почти всегда транзиентный глюк провайдера (см. issue #28),
+    поэтому поднимаем её прямо в теле @_llm_retry-функции — обычный,
+    ретраящийся случай, а не "невалидный ответ, повтор не поможет"."""
+
+
 def _is_transient(exc: BaseException) -> bool:
-    """Ретраить сетевые/API-ошибки провайдера, но не наши ValueError/RuntimeError
-    (невалидный ключ, невалидный JSON) — повторный вызов их не исправит."""
+    """Ретраить сетевые/API-ошибки провайдера (включая пустой completion), но не
+    наши ValueError/RuntimeError (невалидный ключ, невалидный JSON) — повторный
+    вызов их не исправит."""
     return not isinstance(exc, (RuntimeError, ValueError))
 
 
@@ -138,7 +151,10 @@ async def _call_anthropic(prompt: str, cfg: Config, model: str) -> str:
         messages=[{"role": "user", "content": prompt}],
     )
     parts = [b.text for b in message.content if isinstance(b, TextBlock)]
-    return "".join(parts).strip()
+    text = "".join(parts).strip()
+    if not text:
+        raise EmptyCompletionError(f"anthropic/{model} вернул пустой completion")
+    return text
 
 
 # ───────────── OpenAI / OpenRouter ─────────────
@@ -160,7 +176,9 @@ async def _call_openai(prompt: str, cfg: Config, model: str) -> str:
     )
 
     content = response.choices[0].message.content
-    return content.strip() if content else ""
+    if not content or not content.strip():
+        raise EmptyCompletionError(f"{cfg.llm.provider}/{model} вернул пустой completion")
+    return cast(str, content.strip())
 
 
 # ───────────── JSON parsing ─────────────
