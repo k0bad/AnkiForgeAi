@@ -32,7 +32,11 @@ ankiforgeai init                    # creates the SQLite schema + the LanguageCa
                                      #  with AnkiConnect for the note-type half). If the note type already
                                      # exists, re-running pushes the current front/back templates + CSS
                                      # (updateModelTemplates/updateModelStyling) instead of a no-op — rerun
-                                     # after editing anki/notetype.py or anki.fields to sync the card design.
+                                     # after editing anki/notetype.py to sync the card design. Field-list
+                                     # changes (anki.fields in language.yaml) are NOT synced this way —
+                                     # init only warns on drift (notetype.diff_fields); renaming/removing
+                                     # a field in an existing Note Type is a manual Anki Browse operation
+                                     # (data loss risk), never done automatically.
 
 # Dev
 ruff check src/

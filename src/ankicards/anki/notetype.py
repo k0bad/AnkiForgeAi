@@ -436,6 +436,18 @@ def field_names() -> list[str]:
     return [f.name for f in _active_fields()]
 
 
+def diff_fields(anki_fields: list[str]) -> tuple[list[str], list[str]]:
+    """(missing_in_anki, extra_in_anki) — сравнение реальных полей Note Type в Anki
+    (AnkiConnect.model_field_names) со схемой в коде (anki.fields в language.yaml).
+
+    init никогда не переносит это расхождение сам: modelFieldAdd/Remove/Rename
+    затрагивают данные уже существующих заметок, это осознанно ручная операция."""
+    local_fields = field_names()
+    missing_in_anki = [f for f in local_fields if f not in anki_fields]
+    extra_in_anki = [f for f in anki_fields if f not in local_fields]
+    return missing_in_anki, extra_in_anki
+
+
 def _guard(field: NoteFieldDef, inner: str) -> str:
     return f"{{{{#{field.name}}}}}{inner}{{{{/{field.name}}}}}" if field.optional else inner
 

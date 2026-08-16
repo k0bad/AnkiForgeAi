@@ -182,6 +182,29 @@ def test_default_fields_used_when_language_has_no_override(patch_language) -> No
     ]
 
 
+def test_diff_fields_empty_when_matching(patch_language) -> None:
+    patch_language(language="nb")
+    local = notetype.field_names()
+
+    missing, extra = notetype.diff_fields(local)
+
+    assert missing == []
+    assert extra == []
+
+
+def test_diff_fields_detects_missing_and_extra(patch_language) -> None:
+    """anki.fields поменялся в коде после того, как Note Type уже был создан в Anki:
+    init не переносит список полей сам (см. cli.py init), только делает это видимым."""
+    patch_language(language="nb")
+    local = notetype.field_names()
+    anki_fields = [*local[:-1], "LegacyField"]  # "ID" отсутствует, "LegacyField" лишний
+
+    missing, extra = notetype.diff_fields(anki_fields)
+
+    assert missing == ["ID"]
+    assert extra == ["LegacyField"]
+
+
 def test_custom_field_subset_reflected_in_field_names_and_card_fields(
     patch_custom_fields,
 ) -> None:

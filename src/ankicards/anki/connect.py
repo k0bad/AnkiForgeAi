@@ -5,7 +5,7 @@
 
 Используемые actions:
 - deckNames / createDeck
-- modelNames / createModel / updateModelTemplates / updateModelStyling
+- modelNames / modelFieldNames / createModel / updateModelTemplates / updateModelStyling
 - addNote / updateNoteFields / deleteNotes
 - findNotes / notesInfo
 - findCards / cardsInfo  — данные о повторениях (interval/reps), не про заметки
@@ -83,6 +83,12 @@ class AnkiConnect:
 
     async def model_names(self) -> list[str]:
         return cast(list[str], await self._call("modelNames"))
+
+    async def model_field_names(self, model_name: str) -> list[str]:
+        """Реальный список полей Note Type в Anki — для сверки со схемой в коде
+        (anki.fields в language.yaml), которую init никогда не пушит автоматически
+        для уже существующего Note Type (только Front/Back/CSS, см. update_model_*)."""
+        return cast(list[str], await self._call("modelFieldNames", modelName=model_name))
 
     async def create_model(
         self,

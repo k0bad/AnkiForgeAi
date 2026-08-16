@@ -34,6 +34,7 @@ from .anki.notetype import (
     CSS,
     NoteTypeConfigError,
     back_template,
+    diff_fields,
     field_names,
     front_template,
     validate_active_fields,
@@ -138,6 +139,29 @@ def init() -> None:
             await anki.update_model_styling(note_type, CSS)
             logger.info("notetype.styling_synced", note_type=note_type)
             console.print(f"[green]✓[/] Note Type обновлён (дизайн синхронизирован): {note_type}")
+
+            # updateModelTemplates/updateModelStyling переносят только HTML/CSS — список
+            # полей Note Type они не трогают (см. notetype.diff_fields). Здесь только
+            # делаем расхождение видимым, автоматически ничего не чиним.
+            anki_fields = await anki.model_field_names(note_type)
+            missing_in_anki, extra_in_anki = diff_fields(anki_fields)
+            if missing_in_anki or extra_in_anki:
+                logger.warning(
+                    "notetype.fields_mismatch",
+                    note_type=note_type,
+                    missing_in_anki=missing_in_anki,
+                    extra_in_anki=extra_in_anki,
+                )
+                console.print(
+                    "[yellow]![/] Список полей Note Type в Anki разошёлся со схемой в коде "
+                    "(anki.fields в language.yaml) — init не переносит его автоматически "
+                    "(переименование/удаление поля стирает данные в существующих заметках, "
+                    "это ручная операция: Anki → Browse → Manage Note Types)."
+                )
+                if missing_in_anki:
+                    console.print(f"    Есть в коде, нет в Anki: {', '.join(missing_in_anki)}")
+                if extra_in_anki:
+                    console.print(f"    Есть в Anki, нет в коде: {', '.join(extra_in_anki)}")
             return
 
         fields = field_names()
