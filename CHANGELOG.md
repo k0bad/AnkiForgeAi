@@ -4,6 +4,13 @@ All notable changes to AnkiForgeAI will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- `config.yaml` moved out of git tracking (closes #52): `git pull` was overwriting local settings
+  (Anki URL, n8n webhook, dedupe thresholds, image provider) with the repo's defaults. `config.yaml`
+  is now in `.gitignore`; the repo ships `config.yaml.example` as the template. One-time setup:
+  `cp config.yaml.example config.yaml` (also done automatically by `ankiforgeai setup`). See
+  `DEVELOPER_GUIDE.md` §11 for the one-time migration steps on existing checkouts.
+
 ## [0.4.0] — 2026-08-16
 
 ### Added

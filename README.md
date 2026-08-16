@@ -115,6 +115,8 @@ uv pip install -e ".[dev]"
 # Configuration
 cp .env.example .env
 # edit .env — add your API keys
+cp config.yaml.example config.yaml
+# edit config.yaml — Anki URL, deck name, language, providers, etc.
 
 # Initialize (DB + Anki Note Type)
 ankiforgeai init

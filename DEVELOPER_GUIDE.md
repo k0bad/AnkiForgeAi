@@ -167,6 +167,13 @@ pending → approved (dedupe уверен / AI решил DIFFERENT) → pushed 
 
 ### Конфиг (config.yaml) — ключевые параметры
 
+`config.yaml` — локальный файл, в `.gitignore` (как `.env`). В репозитории лежит только
+`config.yaml.example` (шаблон с дефолтами). Первичная настройка: `cp config.yaml.example
+config.yaml`, затем отредактировать под себя (`ankiforgeai setup` делает то же самое
+интерактивно). `git pull` больше не трогает `config.yaml` — реальные Anki URL, webhook и пороги
+dedupe не перезаписываются обновлениями репозитория. Если правишь дефолты для всех — правь
+`config.yaml.example`, а не `config.yaml`.
+
 ```yaml
 transcription: practical       # practical (кириллица) | ipa (Международный фонетический алфавит)
 
@@ -551,13 +558,28 @@ enrichment. **Важно:** `init` создаёт Note Type только оди�
 
 ## 11. Обновление репозитория на других машинах (git pull)
 
-**В общем случае обычный `git pull` безопасен.** Новые поля в `config.yaml` (`transcription`,
-`notifications`, `images.provider`, ...) и в `.env` (`PEXELS_API_KEY`, `PIXABAY_API_KEY`, ...)
-всегда получают дефолты в Pydantic-моделях (`config.py`) — старый `config.yaml`/`.env` без этих
-полей продолжит работать как раньше, просто без новых фич, пока их не включат вручную. Схему БД
-(`db.py`) и Anki note type (`anki/notetype.py`) эти апдейты не трогали — повторно запускать
-`ankiforgeai init` не нужно, если только `DEVELOPER_GUIDE.md` явно не скажет обратное для
-конкретного изменения.
+**В общем случае обычный `git pull` безопасен.** `config.yaml` — локальный файл (`.gitignore`,
+см. §3), `git pull` его больше не трогает вообще: новые поля (`transcription`, `notifications`,
+`images.provider`, ...) и поля в `.env` (`PEXELS_API_KEY`, `PIXABAY_API_KEY`, ...) всегда получают
+дефолты в Pydantic-моделях (`config.py`) — старый `config.yaml`/`.env` без этих полей продолжит
+работать как раньше, просто без новых фич, пока их не включат вручную. Схему БД (`db.py`) и Anki
+note type (`anki/notetype.py`) эти апдейты не трогали — повторно запускать `ankiforgeai init` не
+нужно, если только `DEVELOPER_GUIDE.md` явно не скажет обратное для конкретного изменения.
+
+**Разовая миграция для чекаутов, сделанных до этого изменения (issue #52):** раньше `config.yaml`
+был отслеживаемым файлом, поэтому `git pull`/`reset --hard` мог перезаписать реальные настройки
+(Anki URL, webhook, пороги dedupe) дефолтами из репозитория — либо, при локальных незакоммиченных
+правках, git мог применить rename `config.yaml → config.yaml.example` и унести реальные значения
+в файл, который снова окажется отслеживаемым. После обновления один раз:
+
+```bash
+git status                          # если config.yaml.example содержит твои реальные значения —
+                                     # значит именно это и произошло
+cp config.yaml.example config.yaml  # вернуть реальные настройки в теперь-локальный файл
+git checkout HEAD -- config.yaml.example  # откатить example обратно к чистому шаблону из репо
+```
+
+Дальше `config.yaml` в `.gitignore` и `git pull` его больше не задевает.
 
 **Разовое исключение:** история ветки `dev` была переписана и force-push'нута 2026-08-11 (из
 авторов коммитов удалён реальный email). Любой клон/чекаут `dev`, сделанный **до** этой даты, не
