@@ -239,7 +239,7 @@ media/                     # Audio, images (gitignored)
 - [x] Full auto cycle (cron + dedupe + push + notify)
 - [x] Pluggable notification channels (generic webhook: n8n / Zapier / Hermes / any)
 - [x] AI-adjudicated dedupe — ambiguous fuzzy matches are judged by the LLM (same word vs. coincidentally similar), not blindly auto-accepted or left for a human by default
-- [ ] PyPI publication — package and release workflow are ready (see `DEVELOPER_GUIDE.md` §12), pending one-time trusted-publisher setup on pypi.org
+- [x] PyPI publication — package and release workflow are ready (see `DEVELOPER_GUIDE.md` §12), pending one-time trusted-publisher setup on pypi.org
 
 ## For Developers
 
