@@ -49,7 +49,7 @@ from .log import bound_run, get_logger
 from .migrate_ids import migrate_ids as run_migrate_ids
 from .migrate_ids import needs_migration
 from .models import Status
-from .pipeline import NoteTypeMissingError, push_approved, run_ingest_pipeline
+from .pipeline import NoteTypeMissingError, check_level_progress, push_approved, run_ingest_pipeline
 from .review import actions as review_actions
 from .review.interactive import review_pending
 
@@ -176,10 +176,12 @@ def ingest_url_cmd(
     with bound_run("ingest_url"):
         stats = asyncio.run(_run())
 
+    level_totals = _level_totals(db)
     if as_json:
-        print(json.dumps(stats, ensure_ascii=False, indent=2))
+        print(json.dumps({**stats, "level_totals": level_totals}, ensure_ascii=False, indent=2))
     else:
         _print_stats(stats)
+        _print_level_totals(level_totals)
 
 
 @ingest_app.command("topic")
@@ -205,10 +207,12 @@ def ingest_topic_cmd(
     with bound_run("ingest_topic"):
         stats = asyncio.run(_run())
 
+    level_totals = _level_totals(db)
     if as_json:
-        print(json.dumps(stats, ensure_ascii=False, indent=2))
+        print(json.dumps({**stats, "level_totals": level_totals}, ensure_ascii=False, indent=2))
     else:
         _print_stats(stats)
+        _print_level_totals(level_totals)
 
 
 @review_app.callback(invoke_without_command=True)
@@ -358,20 +362,29 @@ def push(as_json: bool = typer.Option(False, "--json", help="Машиночит�
     db = _open_db(cfg)
     anki = AnkiConnect(cfg)
 
-    async def _run() -> int:
-        return await push_approved(db, anki, cfg)
+    async def _run() -> tuple[int, list[dict]]:
+        count = await push_approved(db, anki, cfg)
+        hints = await check_level_progress(db, anki, cfg) if count > 0 else []
+        return count, hints
 
     with bound_run("push"):
         try:
-            count = asyncio.run(_run())
+            count, hints = asyncio.run(_run())
         except (NoteTypeMissingError, AnkiConnectError) as e:
             console.print(f"[red]✗[/] {e}")
             raise typer.Exit(code=1) from e
 
     if as_json:
-        print(json.dumps({"pushed": count}, ensure_ascii=False))
+        print(json.dumps({"pushed": count, "level_hints": hints}, ensure_ascii=False))
     else:
         console.print(f"[green]✓[/] Отправлено в Anki: {count}")
+        for hint in hints:
+            console.print(
+                f"[yellow]💡[/] Уровень {hint['level'].upper()}: {hint['mature']}/{hint['total']} "
+                f"карточек зрелые ({hint['mature_ratio']:.0%}) — похоже, пора добавлять "
+                f"{hint['next_level'].upper()} (ankiforgeai ingest topic ... "
+                f"--level {hint['next_level'].upper()})"
+            )
 
 
 @app.command()
@@ -548,6 +561,30 @@ def _print_stats(stats: dict) -> None:
     table.add_column("Значение", justify="right")
     for key, value in stats.items():
         table.add_row(key, str(value))
+    console.print(table)
+
+
+def _level_totals(db: Database) -> dict[str, dict[str, int]]:
+    """{level: {"total": N, "pushed": M}} — total считает все статусы кроме skipped,
+    чтобы отражать реальный словарный запас, а не отклонённые дубликаты."""
+    raw = db.count_by_level()
+    result = {}
+    for level, by_status in sorted(raw.items()):
+        pushed = by_status.get(Status.PUSHED.value, 0)
+        total = sum(n for status, n in by_status.items() if status != Status.SKIPPED.value)
+        result[level] = {"total": total, "pushed": pushed}
+    return result
+
+
+def _print_level_totals(level_totals: dict[str, dict[str, int]]) -> None:
+    if not level_totals:
+        return
+    table = Table(title="Карточки по уровням")
+    table.add_column("Уровень", style="cyan")
+    table.add_column("Всего", justify="right")
+    table.add_column("Запушено", justify="right")
+    for level, counts in level_totals.items():
+        table.add_row(level.upper(), str(counts["total"]), str(counts["pushed"]))
     console.print(table)
 
 

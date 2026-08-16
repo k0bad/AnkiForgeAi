@@ -206,6 +206,19 @@ class Database:
             ).fetchall()
         return [_row_to_card(r) for r in rows]
 
+    def count_by_level(self) -> dict[str, dict[str, int]]:
+        """{level: {status: count}} по всем карточкам с непустым level — для отчёта
+        по уровням после ingest и для подсказки о переходе на следующий уровень."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT level, status, COUNT(*) as n FROM cards "
+                "WHERE level IS NOT NULL GROUP BY level, status"
+            ).fetchall()
+        result: dict[str, dict[str, int]] = {}
+        for row in rows:
+            result.setdefault(row["level"], {})[row["status"]] = row["n"]
+        return result
+
     def get_by_id(self, card_id: int) -> Card | None:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM cards WHERE id = ?", (card_id,)).fetchone()

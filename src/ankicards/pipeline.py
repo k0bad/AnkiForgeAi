@@ -24,7 +24,7 @@ from .enrich.translation import enrich_translation
 from .log import get_logger
 from .media.images import attach_image
 from .media.tts import generate_audio
-from .models import Card, Status
+from .models import Card, Level, Status
 
 logger = get_logger(__name__)
 
@@ -374,3 +374,44 @@ async def push_approved(db: Database, anki: AnkiConnect, cfg: Config) -> int:
         except AnkiConnectError as e:
             _record(db, "warning", "push_failed", card.id, error=str(e))
     return pushed
+
+
+async def check_level_progress(db: Database, anki: AnkiConnect, cfg: Config) -> list[dict]:
+    """Для каждого уровня с запушенными карточками проверить, не пора ли предложить
+    следующий уровень: минимум level_progress_min_cards карточек в Anki И доля с
+    interval >= level_progress_mature_interval_days дней >= level_progress_mature_ratio.
+
+    SQLite-подсчёт (db.count_by_level) — дешёвый ранний выход без похода в сеть; сама
+    проверка "зрелости" идёт по данным из Anki (source of truth, не SQLite — см.
+    CLAUDE.md принцип 1)."""
+    ic = cfg.ingest
+    order = list(Level)
+    totals = db.count_by_level()
+    hints = []
+    for level in order[:-1]:  # C2 — расти уже некуда
+        min_cards = ic.level_progress_min_cards.get(level.value)
+        if min_cards is None:
+            continue
+        pushed = totals.get(level.value, {}).get(Status.PUSHED.value, 0)
+        if pushed < min_cards:
+            continue
+        card_ids = await anki.find_cards(f'deck:"{cfg.anki.deck_name}" tag:level::{level.value}')
+        if len(card_ids) < min_cards:
+            continue
+        infos = await anki.cards_info(card_ids)
+        mature = sum(
+            1 for c in infos if c.get("interval", 0) >= ic.level_progress_mature_interval_days
+        )
+        ratio = mature / len(infos) if infos else 0.0
+        if ratio >= ic.level_progress_mature_ratio:
+            next_level = order[order.index(level) + 1]
+            hints.append(
+                {
+                    "level": level.value,
+                    "next_level": next_level.value,
+                    "total": len(infos),
+                    "mature": mature,
+                    "mature_ratio": round(ratio, 2),
+                }
+            )
+    return hints

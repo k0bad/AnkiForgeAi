@@ -43,6 +43,20 @@ ingest:
   # Генерация по теме
   default_count: 20
   default_level: A2              # CEFR: A1, A2, B1, B2, C1, C2
+  # Подсказка "пора на следующий уровень" при push — минимум карточек уровня в Anki
+  # (по уровням — половина от исследовательских оценок объёма словаря на CEFR-уровень,
+  # см. DEVELOPER_GUIDE.md; колода тут лишь часть общего словарного запаса, не
+  # единственный источник) и доля "зрелых" (interval >= level_progress_mature_interval_days
+  # дней — встроенное в Anki определение mature card), после которых её показывать.
+  # C2 не включён — с него уже некуда переходить.
+  level_progress_min_cards:
+    a1: 250
+    a2: 500
+    b1: 1000
+    b2: 2000
+    c1: 4000
+  level_progress_mature_ratio: 0.8
+  level_progress_mature_interval_days: 21
 
 llm:
   # Провайдер: "anthropic" (Claude) или "openrouter" (OpenAI-совместимые)

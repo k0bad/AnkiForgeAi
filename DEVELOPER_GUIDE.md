@@ -177,6 +177,19 @@ dedupe не перезаписываются обновлениями репоз
 ```yaml
 transcription: practical       # practical (кириллица) | ipa (Международный фонетический алфавит)
 
+ingest:
+  level_progress_min_cards: {a1: 250, a2: 500, b1: 1000, b2: 2000, c1: 4000}
+    # мин. карточек уровня в Anki для подсказки о переходе на следующий, по уровням.
+    # Половина от исследовательских оценок объёма словаря на CEFR-уровень (Nation,
+    # корпусные исследования, ~500/1000/2000/4000/8000/16000 слов на A1..C2 —
+    # "How Many English Words Do You Need at Each CEFR Level?", internationalenglishtest.com;
+    # см. также English Vocabulary Profile от Cambridge для другой методологии подсчёта).
+    # Не берём цифры целиком: эта колода — лишь часть общего словарного запаса
+    # человека (учебники, разговор, медиа тоже дают слова), не единственный источник.
+    # C2 не включён — с него уже некуда переходить.
+  level_progress_mature_ratio: 0.8        # доля "зрелых" карточек (interval >= min_interval_days)
+  level_progress_mature_interval_days: 21 # порог "зрелости" — как в самой Anki (young/mature)
+
 dedupe:
   fuzzy_threshold_review: 85   # ≥ 85 → обязательный ревью (если AI тоже не разрешит)
   fuzzy_threshold_auto: 82     # < 82 → авто-добавление; 82-84 → semiauto ревью

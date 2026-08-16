@@ -72,6 +72,18 @@ class IngestConfig(BaseModel):
     url_timeout_seconds: int = 30
     default_count: int = 20
     default_level: str = "A2"
+    # Подсказка "пора на следующий уровень" (см. pipeline.check_level_progress) — минимум
+    # карточек уровня в Anki (по уровням — половина от исследовательских оценок объёма
+    # словаря на CEFR-уровень, см. DEVELOPER_GUIDE.md; колода тут лишь часть общего
+    # словарного запаса, не единственный его источник, поэтому не берём цифры целиком)
+    # и доля "зрелых" (interval >= level_progress_mature_interval_days дней — встроенное
+    # в Anki определение mature card), после которых её показывать при push. C2 не
+    # включён — с него уже некуда переходить (см. Level, максимальный уровень).
+    level_progress_min_cards: dict[str, int] = Field(
+        default_factory=lambda: {"a1": 250, "a2": 500, "b1": 1000, "b2": 2000, "c1": 4000}
+    )
+    level_progress_mature_ratio: float = 0.8
+    level_progress_mature_interval_days: int = 21
 
 
 class LLMConfig(BaseModel):

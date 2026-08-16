@@ -32,9 +32,12 @@ path emits JSON), so check exit code before parsing.
 # 1. Add words
 ankiforgeai ingest topic "<тема>" --count 20 --level A2 --json
 ankiforgeai ingest url <URL> --json
-# → {"new": N, "review": M, "merged": K, "enriched": ..., "audio": ..., "errors": ...}
+# → {"new": N, "review": M, "merged": K, "enriched": ..., "audio": ..., "errors": ...,
+#    "level_totals": {"a1": {"total": N, "pushed": M}, "a2": {...}, ...}}
 # Cards that clear dedupe automatically end up status=approved already — no review needed.
 # Cards with decision=review (fuzzy duplicate, AI unsure) need step 2.
+# level_totals is a straight vocabulary-size report (all statuses except skipped) — relay
+# it to the user in chat (e.g. "A1: 45 слов, A2: 12 слов") so they can see where they stand.
 
 # 2. See what needs a human/agent decision
 ankiforgeai review list --json
@@ -50,7 +53,10 @@ ankiforgeai review resume  <id> [<id> ...]          # → status=review again (u
 ankiforgeai review edit    <id> -f word=... -f translation=... -f example=... -f example_translation=...
 
 # 4. Push approved cards to Anki (requires Anki running with AnkiConnect on :8765)
-ankiforgeai push --json   # → {"pushed": N}
+ankiforgeai push --json   # → {"pushed": N, "level_hints": [...]}
+# level_hints is [] unless a level has enough cards in Anki AND most of them are already
+# well-reviewed (mature intervals) — each hint means "this level is solid, consider the
+# next one". If non-empty, tell the user in chat which level and what's next.
 
 # 5. Refresh local dedupe cache from Anki (run after manual edits in Anki itself)
 ankiforgeai sync --json   # → {"synced": N}

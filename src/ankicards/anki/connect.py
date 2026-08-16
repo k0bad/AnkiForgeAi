@@ -8,6 +8,7 @@
 - modelNames / createModel / updateModelTemplates / updateModelStyling
 - addNote / updateNoteFields / deleteNotes
 - findNotes / notesInfo
+- findCards / cardsInfo  — данные о повторениях (interval/reps), не про заметки
 - storeMediaFile  — загрузить mp3/jpg в collection.media
 """
 
@@ -154,6 +155,17 @@ class AnkiConnect:
         if not note_ids:
             return []
         return cast(list[dict], await self._call("notesInfo", notes=note_ids))
+
+    async def find_cards(self, query: str) -> list[int]:
+        """Поиск карточек (не заметок) по Anki-синтаксису — для доступа к interval/reps
+        через cards_info (заметки этих данных не несут, только сами карточки)."""
+        return cast(list[int], await self._call("findCards", query=query))
+
+    async def cards_info(self, card_ids: list[int]) -> list[dict]:
+        """Данные о повторениях карточек: interval, reps, queue, type, ..."""
+        if not card_ids:
+            return []
+        return cast(list[dict], await self._call("cardsInfo", cards=card_ids))
 
     # ───────────── Media ─────────────
 
