@@ -24,6 +24,9 @@ jobs:
       - name: Install dependencies
         run: uv pip install -e ".[dev]"
 
+      - name: Set up local config
+        run: cp config.yaml.example config.yaml
+
       - name: Lint
         run: uv run ruff check src/
 
