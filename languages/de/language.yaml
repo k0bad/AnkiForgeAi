@@ -17,13 +17,13 @@ pos_labels:
 
 forms:
   noun:
-    - {key: gender, label: "Род"}
-    - {key: article, label: "Артикль"}
+    - {key: gender, label: "Geschlecht"}
+    - {key: article, label: "Artikel"}
     - {key: nominative, label: "Nominativ — wer? was?"}
     - {key: genitive, label: "Genitiv — wessen?"}
     - {key: dative, label: "Dativ — wem?"}
     - {key: accusative, label: "Akkusativ — wen? was?"}
-    - {key: plural, label: "Множественное число"}
+    - {key: plural, label: "Plural"}
   verb:
     - {key: infinitive, label: Infinitiv}
     - {key: present_ich, label: "Präsens (ich)"}
