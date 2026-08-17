@@ -107,16 +107,29 @@ notifications:
   # Каналы доставки отчёта scripts/daily_topic.py (--notify).
   # type: webhook — POST JSON на любой URL-посредник (n8n, Hermes, Zapier, свой шлюз-бот).
   # format: text (default) — готовое Telegram-flavored сообщение {"text": "..."}, под
-  #                           текущий n8n workflow (parse_mode: Markdown).
+  #                           n8n workflow (parse_mode: Markdown) или прямой relay в
+  #                           Telegram Bot API.
   #         json            — сырой report целиком, без форматирования под конкретный
   #                           мессенджер — для посредника со своей маршрутизацией
   #                           (например Hermes: сам решает, в Telegram это, в другую
   #                           соцсеть или в AI-агента).
+  # url: пусто здесь намеренно — этот файл коммитится в публичный репозиторий.
+  #      Реальный адрес (может содержать bot-токен) кладётся в .env как
+  #      NOTIFY_WEBHOOK_URL и переопределяет это поле (см. notify/webhook.py).
   - type: webhook
-    enabled: true
+    enabled: false   # n8n немає — можна вимкнути (не заважає, просто зайвий warning у логах, якщо лишити true)
     format: text
-    url: "http://localhost:5678/webhook/ankicards-notify"
+    url: ""
   # - type: webhook
   #   enabled: false
   #   format: json
   #   url: "http://localhost:PORT/hermes-endpoint"
+
+  # type: telegram — прямой Telegram Bot API, без n8n/Hermes-посредника (issue #55).
+  # token: пусто здесь намеренно — реальный bot-токен кладётся в .env как
+  #        NOTIFY_TELEGRAM_TOKEN (см. .env.example, notify/telegram.py).
+  - type: telegram
+    enabled: true
+    chat_id: "727658367"
+    # topic_id: 12345      # лише якщо пишеш у конкретну тему групи
+    parse_mode: "Markdown" # це і так дефолт, можна не вказувати

@@ -16,6 +16,13 @@ All notable changes to AnkiForgeAI will be documented in this file.
   a raw class, since construction differs per backend; `format_report()` moved from
   `notify/webhook.py` to `notify/format.py` since both backends render the same
   Telegram-flavored markdown text.
+- Windows Task Scheduler support for the daily automation cycle: `scripts/daily_topic.ps1`
+  mirrors `daily_topic.sh`'s full cycle (generate → dedupe/enrich → auto-push → notify) for
+  environments without bash, documented in `README.md` alongside the existing cron example.
+  The webhook URL also gets the same `.env` override treatment as the Telegram token above:
+  `NOTIFY_WEBHOOK_URL` takes priority over `notifications[].url` in `config.yaml`, and a
+  webhook channel with no URL from either source is skipped (`notify.no_url`) instead of
+  failing the run — `WebhookNotifier.from_entry()` mirrors `TelegramNotifier.from_entry()`.
 
 ## [0.4.0] — 2026-08-16
 

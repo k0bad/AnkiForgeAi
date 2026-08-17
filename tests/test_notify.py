@@ -182,6 +182,42 @@ async def test_webhook_notifier_raises_on_http_error(monkeypatch: pytest.MonkeyP
         await notifier.send(_report())
 
 
+def test_webhook_from_entry_prefers_env_url_over_config_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "ankicards.notify.webhook.get_secrets",
+        lambda: Secrets(notify_webhook_url="http://from-env.test"),
+    )
+    entry = NotificationConfig(type="webhook", url="http://from-config.test")
+
+    notifier = WebhookNotifier.from_entry(entry)
+
+    assert notifier is not None
+    assert notifier.url == "http://from-env.test"
+
+
+def test_webhook_from_entry_falls_back_to_config_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "ankicards.notify.webhook.get_secrets", lambda: Secrets(notify_webhook_url="")
+    )
+    entry = NotificationConfig(type="webhook", url="http://from-config.test")
+
+    notifier = WebhookNotifier.from_entry(entry)
+
+    assert notifier is not None
+    assert notifier.url == "http://from-config.test"
+
+
+def test_webhook_from_entry_none_without_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "ankicards.notify.webhook.get_secrets", lambda: Secrets(notify_webhook_url="")
+    )
+    entry = NotificationConfig(type="webhook", url="")
+
+    assert WebhookNotifier.from_entry(entry) is None
+
+
 # ───────────── TelegramNotifier ─────────────
 
 
@@ -306,6 +342,9 @@ async def test_dispatch_skips_disabled_channels(
         calls.append(self.url)
 
     monkeypatch.setattr(WebhookNotifier, "send", fake_send)
+    monkeypatch.setattr(
+        "ankicards.notify.webhook.get_secrets", lambda: Secrets(notify_webhook_url="")
+    )
 
     cfg = _make_config(
         tmp_path,
@@ -331,6 +370,9 @@ async def test_dispatch_one_channel_failure_does_not_block_others(
             raise httpx.ConnectError("boom")
 
     monkeypatch.setattr(WebhookNotifier, "send", fake_send)
+    monkeypatch.setattr(
+        "ankicards.notify.webhook.get_secrets", lambda: Secrets(notify_webhook_url="")
+    )
 
     cfg = _make_config(
         tmp_path,
@@ -354,6 +396,9 @@ async def test_dispatch_passes_format_from_config_entry(
         captured.append(self.format)
 
     monkeypatch.setattr(WebhookNotifier, "send", fake_send)
+    monkeypatch.setattr(
+        "ankicards.notify.webhook.get_secrets", lambda: Secrets(notify_webhook_url="")
+    )
 
     cfg = _make_config(
         tmp_path,
@@ -399,6 +444,9 @@ async def test_dispatch_fans_out_to_webhook_and_telegram_together(
     monkeypatch.setattr(WebhookNotifier, "send", fake_webhook_send)
     monkeypatch.setattr(TelegramNotifier, "send", fake_telegram_send)
     monkeypatch.setattr(
+        "ankicards.notify.webhook.get_secrets", lambda: Secrets(notify_webhook_url="")
+    )
+    monkeypatch.setattr(
         "ankicards.notify.telegram.get_secrets", lambda: Secrets(notify_telegram_token="")
     )
 
@@ -415,6 +463,25 @@ async def test_dispatch_fans_out_to_webhook_and_telegram_together(
     await dispatch(_report(), cfg)
 
     assert set(calls) == {"webhook:http://n8n.test", "telegram:42"}
+
+
+async def test_dispatch_skips_webhook_channel_without_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fake_send(self: WebhookNotifier, report: dict[str, Any]) -> None:
+        raise AssertionError("should not be called")
+
+    monkeypatch.setattr(WebhookNotifier, "send", fake_send)
+    monkeypatch.setattr(
+        "ankicards.notify.webhook.get_secrets", lambda: Secrets(notify_webhook_url="")
+    )
+
+    cfg = _make_config(
+        tmp_path,
+        notifications=[NotificationConfig(type="webhook", enabled=True, url="")],
+    )
+
+    await dispatch(_report(), cfg)  # не должно бросить исключение (лог notify.no_url)
 
 
 async def test_dispatch_skips_telegram_channel_without_token(

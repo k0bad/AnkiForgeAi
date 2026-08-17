@@ -275,6 +275,9 @@ class Secrets(BaseSettings):
     unsplash_access_key: str = ""
     pexels_api_key: str = ""
     pixabay_api_key: str = ""
+    # Переопределяет notifications[].url из config.yaml — тот файл публичный,
+    # реальный адрес (может содержать bot-токен) держим тут (см. notify/webhook.py).
+    notify_webhook_url: str = ""
     # Переопределяет notifications[].token из config.yaml — тот файл публичный,
     # реальный bot-токен держим тут (см. notify/telegram.py).
     notify_telegram_token: str = ""
