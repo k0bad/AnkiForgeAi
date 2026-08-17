@@ -70,6 +70,17 @@ def format_report(report: dict[str, Any]) -> str:
         f"audio={stats.get('audio', 0)}, errors={stats.get('errors', 0)}"
     )
 
+    # images отсутствует в stats целиком, если images.enabled=false (issue #54) —
+    # тогда строку не показываем вовсе, а не 0/0/0, который выглядел бы как факт
+    # о картинках при выключенной стадии.
+    images = stats.get("images")
+    if images:
+        lines.append(
+            f"🖼️ Картинки: {images.get('found', 0)} найдено, "
+            f"{images.get('skipped_not_noun', 0)} пропущено (не существительное), "
+            f"{images.get('failed_no_result', 0)} не найдено (провайдер)"
+        )
+
     if report.get("needs_review"):
         lines.append(
             f"⏳ Ждут ручного ревью: {report['needs_review']} карточек (`ankiforgeai review`)"
