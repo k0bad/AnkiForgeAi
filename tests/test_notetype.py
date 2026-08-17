@@ -280,6 +280,37 @@ def test_back_image_layer_is_guarded(patch_language) -> None:
     assert '{{#Image}}<div class="bg-back">{{Image}}</div>{{/Image}}' in back
 
 
+def test_front_image_placeholder_shown_when_no_image(patch_language) -> None:
+    """design_handoff_image_placeholder: вместо пустого места — заглушка с "?", когда у
+    карточки нет картинки (любая причина, не только неудачный поиск)."""
+    patch_language(language="nb")
+    front = notetype.front_template()
+    assert "{{^Image}}" in front
+    assert '<div class="bg-empty">' in front
+    assert '<div class="mark">?</div>' in front
+    assert '<div class="cap">no image</div>' in front
+
+
+def test_back_image_placeholder_shown_when_no_image(patch_language) -> None:
+    patch_language(language="nb")
+    back = notetype._build_back_template()
+    assert '{{^Image}}<div class="bg-back-empty"><div class="mark">?</div></div>{{/Image}}' in back
+
+
+def test_image_placeholder_omitted_when_image_field_not_optional(patch_custom_fields) -> None:
+    """Если Image объявлен без optional=True, схема считает поле всегда заполненным —
+    fallback-ветка ({{^Image}}) не нужна и не добавляется."""
+    patch_custom_fields(
+        [
+            NoteFieldDef(name="Word", source="word", slot="front_title"),
+            NoteFieldDef(name="Image", source="image_html", slot="front_image", css_class="bg"),
+        ]
+    )
+    front = notetype.front_template()
+    assert "{{^Image}}" not in front
+    assert "bg-empty" not in front
+
+
 def test_header_recaps_word_pronunciation_pos_level_audio(patch_language) -> None:
     patch_language(language="nb")
     back = notetype._build_back_template()
