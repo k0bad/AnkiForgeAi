@@ -91,6 +91,28 @@ def test_format_report_push_error() -> None:
     assert "Anki недоступен: timeout" in text
 
 
+def test_format_report_images_breakdown() -> None:
+    stats = {
+        "new": 1,
+        "review": 0,
+        "merged": 0,
+        "enriched": 1,
+        "audio": 1,
+        "errors": 0,
+        "images": {"found": 4, "skipped_not_noun": 2, "failed_no_result": 1},
+    }
+    text = format_report(_report(stats=stats))
+    assert "🖼️ Картинки: 4 найдено, 2 пропущено (не существительное), " in text
+    assert "1 не найдено (провайдер)" in text
+
+
+def test_format_report_omits_images_line_when_images_disabled() -> None:
+    # pipeline.enrich_and_generate_media не кладёт "images" в stats вовсе, если
+    # cfg.images.enabled=false — тот же случай воспроизводим тут явно.
+    text = format_report(_report())
+    assert "🖼️" not in text
+
+
 # ───────────── WebhookNotifier ─────────────
 
 
