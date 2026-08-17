@@ -113,6 +113,7 @@ Key settings to know:
 - `images.fallback_providers: []` — opt-in list of providers to try in order if `images.provider` returns nothing (empty/no key/403/429/5xx); empty by default, so behavior is unchanged unless explicitly configured
 - `images.only_for_pos: [noun]` — images generated only for nouns
 - `enrich.grammar` / `enrich.examples` / `enrich.pronunciation` — toggle individual enrichment stages (set by `ankiforgeai setup`)
+- `concurrency: 5` — how many cards `enrich_and_generate_media` processes in parallel for the non-batched per-card stages (translation, TTS, image search/download); grammar/examples/pronunciation are already single batch LLM calls and unaffected. Raise for faster ingest, lower if an image provider's rate limit gets hit
 
 ## Code conventions
 

@@ -9,6 +9,7 @@ Pipeline для одного потока кандидатов:
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 
 from .anki.connect import AnkiConnect, AnkiConnectError
@@ -156,32 +157,29 @@ async def enrich_and_generate_media(
                 incomplete_ids,
             )
 
-        # Translation — базовая стадия (без тумблера, всегда включена)
-        try:
-            logger.info("stage.start", stage="translation", count=len(cards))
-            for card in cards:
-                if _needs_translation_stage(card, cfg):
-                    await enrich_translation(card)
-            logger.info("stage.done", stage="translation")
-        except Exception as e:
-            stats["errors"] += 1
-            _record(db, "warning", "enrich_failed", None, error=str(e), count=len(cards))
+        # Translation — базовая стадия (без тумблера, всегда включена). Каждая
+        # карточка — отдельный LLM-вызов (в отличие от batch-стадий ниже), так что
+        # гоняем их параллельно (ограничено cfg.concurrency) вместо одной за другой —
+        # иначе N карточек означает N последовательных round-trip'ов. Ошибка одной
+        # карточки не должна блокировать остальные, поэтому try/except — per-card.
+        translation_targets = [c for c in cards if _needs_translation_stage(c, cfg)]
+        if translation_targets:
+            logger.info("stage.start", stage="translation", count=len(translation_targets))
+            sem = asyncio.Semaphore(cfg.concurrency)
 
-        # Per-card translation retry (если не заполнилось)
-        for card in cards:
-            if not _needs_translation_stage(card, cfg):
-                continue
-            try:
-                await enrich_translation(card)
-            except Exception as e:
-                stats["errors"] += 1
-                db.log_action(
-                    "enrich_failed",
-                    card_id=card.id,
-                    details={"stage": "translation", "error": str(e)},
-                )
-                incomplete_ids.add(_card_id(card))
-            else:
+            async def _translate_one(card: Card) -> None:
+                async with sem:
+                    try:
+                        await enrich_translation(card)
+                    except Exception as e:
+                        stats["errors"] += 1
+                        db.log_action(
+                            "enrich_failed",
+                            card_id=card.id,
+                            details={"stage": "translation", "error": str(e)},
+                        )
+                        incomplete_ids.add(_card_id(card))
+                        return
                 if not card.translation:
                     incomplete_ids.add(_card_id(card))
                     db.log_action(
@@ -189,6 +187,9 @@ async def enrich_and_generate_media(
                         card_id=card.id,
                         details={"stage": "translation"},
                     )
+
+            await asyncio.gather(*(_translate_one(c) for c in translation_targets))
+            logger.info("stage.done", stage="translation")
 
         # image_query (англ. gloss для поиска картинок) генерируется тем же LLM-вызовом,
         # что и translation, но парсится отдельной строкой ("EN:") и может не прийти,
@@ -239,14 +240,25 @@ async def enrich_and_generate_media(
         stats["enrich_incomplete"] = len(incomplete_ids)
 
     if auto_media and cards:
-        for card in cards:
-            try:
-                await generate_audio(card, cfg)
-                stats["audio"] += 1
-                _record(db, "info", "audio_generated", card.id)
-            except Exception as e:
-                stats["errors"] += 1
-                _record(db, "warning", "audio_failed", card.id, error=str(e))
+        # Аудио и картинки — независимые per-card сетевые вызовы (edge-tts / image API),
+        # раньше прогонялись строго по одной карточке за раз, сначала всё аудио, потом
+        # все картинки. Теперь обе стадии идут параллельно (и друг с другом тоже) под
+        # общим лимитом cfg.concurrency — тот же паттерн, что и translation выше.
+        sem = asyncio.Semaphore(cfg.concurrency)
+
+        async def _generate_audio_one(card: Card) -> None:
+            async with sem:
+                try:
+                    await generate_audio(card, cfg)
+                except Exception as e:
+                    stats["errors"] += 1
+                    _record(db, "warning", "audio_failed", card.id, error=str(e))
+                    return
+            stats["audio"] += 1
+            _record(db, "info", "audio_generated", card.id)
+
+        tasks = [_generate_audio_one(card) for card in cards]
+
         # Картинки для существительных (если включено в конфиге). Разбивка по
         # причине отсутствия (issue #54): "не тот POS" — норма, для остальных
         # частей речи картинки не ищутся вовсе; "провайдер не нашёл" — пустой
@@ -254,19 +266,26 @@ async def enrich_and_generate_media(
         # чинить провайдера/ключ, а не ожидаемое поведение.
         if cfg.images.enabled and auto_pick_images:
             stats["images"] = {"found": 0, "skipped_not_noun": 0, "failed_no_result": 0}
-            for card in cards:
-                if card.pos.value not in cfg.images.only_for_pos:
-                    stats["images"]["skipped_not_noun"] += 1
-                    continue
-                try:
-                    await attach_image(card, cfg, auto_pick=True)
-                except Exception as e:
-                    _record(db, "warning", "image_failed", card.id, error=str(e))
+
+            async def _attach_image_one(card: Card) -> None:
+                async with sem:
+                    try:
+                        await attach_image(card, cfg, auto_pick=True)
+                    except Exception as e:
+                        _record(db, "warning", "image_failed", card.id, error=str(e))
                 if card.image:
                     stats["images"]["found"] += 1
                     _record(db, "info", "image_generated", card.id)
                 else:
                     stats["images"]["failed_no_result"] += 1
+
+            for card in cards:
+                if card.pos.value not in cfg.images.only_for_pos:
+                    stats["images"]["skipped_not_noun"] += 1
+                else:
+                    tasks.append(_attach_image_one(card))
+
+        await asyncio.gather(*tasks)
 
     return stats, incomplete_ids
 

@@ -241,6 +241,13 @@ class Config(BaseModel):
     language: str = "nb"  # код целевого языка → languages/{code}/language.yaml
     ui_language: str = "ru"  # язык подписей бэк-стороны карточки: "ru" | "en"
     transcription: str = "practical"  # тип транскрипции произношения: "practical" | "ipa"
+    # Сколько карточек обрабатывать одновременно на per-card стадиях
+    # enrich_and_generate_media (translation, TTS, поиск/скачивание картинок —
+    # см. pipeline.py). Эти стадии не батчатся в один LLM/API-вызов (в отличие
+    # от grammar/examples/pronunciation), поэтому раньше N карточек означало
+    # N последовательных round-trip'ов. Выше — быстрее ingest, но больше
+    # одновременных запросов к провайдеру картинок (следи за его rate limit).
+    concurrency: int = 5
     paths: PathsConfig
     anki: AnkiConfig
     dedupe: DedupeConfig
