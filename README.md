@@ -31,7 +31,7 @@ Built-in languages: 🇳🇴 Norwegian Bokmål (`nb`), 🇩🇪 German (`de`), �
 | **Pluggable image provider** | `images.provider`: Unsplash, Pexels, Pixabay, or key-free Openverse — legal, free tiers |
 | **Selectable transcription** | `transcription`: `practical` (Cyrillic respelling) or `ipa` — pronunciation hints aren't hardcoded to Russian speakers |
 | **Prompts in `prompts/*.md`** | Improve card quality without touching code |
-| **Any LLM provider** | OpenRouter or Anthropic Claude |
+| **Any LLM provider** | OpenRouter, Anthropic Claude, or the local `claude` CLI (`claude_cli` — no API key, reuses your `claude login`; shares that quota with interactive Claude Code use, so better for occasional generation than heavy cron) |
 
 ## Card statuses
 

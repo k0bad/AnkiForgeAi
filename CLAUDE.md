@@ -91,7 +91,7 @@ Review can interrupt at any stage — user sees pending/review cards and accepts
 
 1. **Source of truth is Anki**, not SQLite. SQLite is staging + audit + dedup cache.
 2. **Card ID** is stored in the Anki note field `ID` and in `anki_note_id` in SQLite.
-3. **All LLM calls go through `llm.py`**, provider selected by `llm.provider` in `config.yaml`: `openrouter` (OpenAI-compatible SDK, default) or `anthropic` (Claude SDK). No local models.
+3. **All LLM calls go through `llm.py`**, provider selected by `llm.provider` in `config.yaml`: `openrouter` (OpenAI-compatible SDK, default), `anthropic` (Claude SDK), or `claude_cli` (headless `claude -p` subprocess, no key needed — reuses the local `claude login`; shares that login's rate limit/quota with interactive Claude Code usage, so it's for occasional manual generation, not high-volume cron). No local models — "no local models" means no local *inference* (Ollama/llama.cpp etc.); `claude_cli` still calls the real first-party Claude service, just through a different local transport/auth than the other two providers.
 4. **Prompts in `languages/{code}/prompts/*.md`**, falling back to top-level `prompts/*.md` — edit them to improve card quality without touching Python. No hardcoded per-language prompt text in Python (see `enrich/translation.py` for the pattern).
 5. **All DB operations in transactions** via `Database.connect()` context manager.
 6. **Media filenames are deterministic**: `{card.id}_nb.mp3`, `{card.id}.jpg` (the `_nb` suffix is legacy and not language-specific). Store filename only, not path.
@@ -105,7 +105,7 @@ Key settings to know:
 - `language: nb` — active language profile, must match a `languages/{code}/` directory
 - `ui_language: ru` — back-of-card label language (`ru` or `en`; see `config.EN_BACK_LABELS`)
 - `transcription: practical | ipa` — pronunciation hint style: `practical` (Cyrillic respelling, default) or `ipa` (International Phonetic Alphabet); picks between `languages/{code}/prompts/russian_pronunciation.md` and `ipa_pronunciation.md`
-- `llm.provider` / `llm.model`: default is `openrouter` / `deepseek/deepseek-v4-flash`; set `provider: anthropic` + a `claude-*` model to use Claude instead
+- `llm.provider` / `llm.model`: default is `openrouter` / `deepseek/deepseek-v4-flash`; set `provider: anthropic` + a `claude-*` model to use Claude via API, or `provider: claude_cli` + a model alias (`sonnet`/`opus`/`haiku`) to use the local `claude` CLI instead — no `.env` key, see `llm.py::_call_claude_cli` and `llm.claude_cli_timeout_seconds`
 - `dedupe.fuzzy_threshold_review: 85` — score ≥ 85 → mandatory review; 70–84 → semiauto
 - `dedupe.ai_adjudication: true` — for fuzzy matches, ask the LLM whether it's a real duplicate before falling back to human review (`dedupe.judge_review`, `prompts/dedupe_judge.md`); `dedupe.judge_model` optionally pins a cheaper/faster model for just that call (empty = `llm.model`, same provider)
 - `tts.voice_female` / `tts.voice_male` — come from the active language profile by default (`languages/{code}/language.yaml` → `tts:`); override in `config.yaml` to pin a different voice
@@ -128,7 +128,9 @@ Key settings to know:
 
 ## What NOT to do
 
-- No local LLMs in this pipeline.
+- No local model *inference* in this pipeline (no Ollama/llama.cpp/etc.). `claude_cli`
+  (see Principles #3) is not an exception to this — it's a transport/auth variant of the
+  real first-party Claude service, not a local model.
 - No file paths in DB — filenames only.
 - No MCP wrappers yet.
 - No CSV export as priority — push via AnkiConnect is the main path.
