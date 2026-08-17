@@ -87,11 +87,14 @@ class IngestConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    provider: str = "openrouter"  # "anthropic" | "openrouter"
+    provider: str = "openrouter"  # "anthropic" | "openrouter" | "claude_cli"
     model: str = "deepseek/deepseek-v4-flash"
     base_url: str = "https://openrouter.ai/api/v1"
     max_tokens: int = 4096
     temperature: float = 0.3
+    # Таймаут headless-вызова `claude -p` (только provider: claude_cli) — SDK-провайдеры
+    # (anthropic/openrouter) таймаутятся сами, а subprocess CLI по умолчанию не ограничен.
+    claude_cli_timeout_seconds: int = 120
 
 
 class TTSConfig(BaseModel):
