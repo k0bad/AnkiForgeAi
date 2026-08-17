@@ -5,6 +5,15 @@ All notable changes to AnkiForgeAI will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `ankiforgeai setup` now offers an interactive LLM/image API key entry (written to
+  `.env`, masked input via `questionary.password`) followed by an optional "generate
+  your first card(s) right now?" step — creates the DB/Note Type, generates a small
+  batch (capped at 5) and pushes it to Anki if reachable, all before the wizard exits.
+  Best-effort throughout: any failure (bad key, Anki not running, ...) degrades to a
+  plain-language status line in the summary panel instead of crashing setup, since
+  `config.yaml` is already saved by that point. Previously getting a first card required
+  three separate manual commands (`init`, `ingest topic`, plus adding API keys to `.env`
+  by hand first). Part of #58.
 - `ankiforgeai setup` now offers to register the daily-automation cycle with the OS
   scheduler on the spot (`src/ankicards/scheduler.py`): Task Scheduler on Windows via
   `Register-ScheduledTask -Force` (idempotent re-registration), cron elsewhere via a

@@ -3,15 +3,18 @@
 Guides user through:
 1. Target language selection
 2. UI language (for back_labels)
-3. Card content preferences
-4. LLM provider + model
+3. Card content preferences (+ image provider API key)
+4. LLM provider + model (+ API key)
 5. Anki connection
-6. Writes config.yaml
-7. Optional: registers the daily-automation cycle with the OS scheduler
+6. Writes config.yaml and .env (any API keys entered above)
+7. Optional: generates + pushes a first small batch of cards right away
+   via .cli.init + .ingest.topic.ingest_by_topic + .pipeline
+8. Optional: registers the daily-automation cycle with the OS scheduler
    (Task Scheduler / cron) via .scheduler.register_daily_automation
 """
 from __future__ import annotations
 
+import asyncio
 import shutil
 from pathlib import Path
 from typing import cast
@@ -26,7 +29,18 @@ from .scheduler import register_daily_automation
 
 LANGUAGES_DIR = languages_dir()
 CONFIG_PATH = DEFAULT_CONFIG_PATH
+ENV_PATH = PROJECT_ROOT / ".env"
+ENV_EXAMPLE_PATH = PROJECT_ROOT / ".env.example"
 SKILL_MD_PATH = PROJECT_ROOT / ".claude" / "skills" / "ankiforgeai" / "SKILL.md"
+
+_IMAGE_KEY_VARS = {
+    "unsplash": "UNSPLASH_ACCESS_KEY",
+    "pexels": "PEXELS_API_KEY",
+    "pixabay": "PIXABAY_API_KEY",
+}
+_FIRST_BATCH_SIZE = 5
+_FIRST_BATCH_TOPIC = "generelt"
+_FIRST_BATCH_LEVEL = "A2"
 
 # Trigger-phrase examples appended to SKILL.md's frontmatter `description`, keyed
 # by ui_language — what the user actually types in chat, not the target language.
@@ -88,6 +102,93 @@ def _load_language_meta(code: str) -> dict:
         return cast(dict, yaml.safe_load(f))
 
 
+def _write_env_secrets(env_path: Path, updates: dict[str, str]) -> None:
+    """Set `KEY=value` lines in `env_path` for `updates`, preserving everything else.
+
+    Seeds from .env.example (structure/comments) if `env_path` doesn't exist yet.
+    Keys not already present as a line get appended.
+    """
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    elif ENV_EXAMPLE_PATH.exists():
+        lines = ENV_EXAMPLE_PATH.read_text(encoding="utf-8").splitlines(keepends=True)
+    else:
+        lines = []
+
+    remaining = dict(updates)
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key = stripped.split("=", 1)[0]
+        if key in remaining:
+            newline = "\n" if line.endswith("\n") else ""
+            lines[i] = f"{key}={remaining.pop(key)}{newline}"
+
+    for key, value in remaining.items():
+        lines.append(f"{key}={value}\n")
+
+    env_path.write_text("".join(lines), encoding="utf-8")
+
+
+def _generate_first_card(count: int) -> str:
+    """Create the DB/Note Type (if needed) and generate + push a small first batch.
+
+    Best-effort: any failure (bad/missing API key, Anki not running, ...) is
+    caught and turned into a plain-language status string instead of crashing
+    the wizard — config.yaml is already saved by the time this runs.
+    """
+    from .cli import init as cli_init
+
+    async def _run() -> str:
+        from .anki.connect import AnkiConnect, AnkiConnectError
+        from .config import get_config
+        from .db import Database
+        from .ingest.topic import ingest_by_topic
+        from .pipeline import NoteTypeMissingError, push_approved, run_ingest_pipeline
+
+        cfg = get_config()
+        db = Database(cfg.paths.db)
+        exclude = [w for _, w in db.all_words()]
+        cards = await ingest_by_topic(
+            topic=_FIRST_BATCH_TOPIC,
+            count=min(count, _FIRST_BATCH_SIZE),
+            level=_FIRST_BATCH_LEVEL,
+            exclude_words=exclude,
+        )
+        if not cards:
+            return (
+                "the LLM returned no cards — check your API key, "
+                "then run `ankiforgeai ingest topic ...`"
+            )
+        stats = await run_ingest_pipeline(cards, db=db, cfg=cfg)
+
+        try:
+            anki = AnkiConnect(cfg)
+            pushed = await push_approved(db, anki, cfg)
+        except (AnkiConnectError, NoteTypeMissingError):
+            return (
+                f"generated {stats['new']} card(s) — start Anki, "
+                "run `ankiforgeai init` then `ankiforgeai push`"
+            )
+
+        if pushed:
+            return f"generated and pushed {pushed} card(s) — open Anki to see them"
+        return (
+            f"generated {stats['new']} card(s), {stats['review']} need review "
+            "— run `ankiforgeai review`"
+        )
+
+    try:
+        cli_init()
+        return asyncio.run(_run())
+    except Exception as e:
+        return (
+            f"couldn't generate cards yet ({e}) — check .env, "
+            "then run `ankiforgeai ingest topic ...`"
+        )
+
+
 def run_setup() -> None:
     console.print()
     console.print(
@@ -146,6 +247,8 @@ def run_setup() -> None:
     ).ask()
 
     # ─── 3. Card content preferences ───
+    env_updates: dict[str, str] = {}
+
     console.print()
     console.print("[cyan]What to show on flashcards?[/]")
     show_image = questionary.confirm("Show images for nouns?", default=True).ask()
@@ -160,6 +263,13 @@ def run_setup() -> None:
                 questionary.Choice("Openverse (no API key needed)", value="openverse"),
             ],
         ).ask()
+        image_key_var = _IMAGE_KEY_VARS.get(image_provider)
+        if image_key_var:
+            image_api_key = questionary.password(
+                f"{image_key_var} (leave empty to add it to .env yourself later):"
+            ).ask()
+            if image_api_key:
+                env_updates[image_key_var] = image_api_key
     show_grammar = questionary.confirm("Show grammar table on back?", default=True).ask()
     show_examples = questionary.confirm("Show example sentences?", default=True).ask()
     show_pronunciation = questionary.confirm(
@@ -198,6 +308,7 @@ def run_setup() -> None:
         default_model = "claude-sonnet-4-5-20250929"
     model = questionary.text("Model name:", default=default_model).ask()
 
+    llm_api_key = None
     if provider == "claude_cli":
         if shutil.which("claude") is None:
             console.print(
@@ -209,6 +320,14 @@ def run_setup() -> None:
             "sessions — fine for occasional generation, not recommended for a heavy daily "
             "cron job.[/]"
         )
+    else:
+        llm_key_var = "OPENROUTER_API_KEY" if provider == "openrouter" else "ANTHROPIC_API_KEY"
+        llm_api_key = questionary.password(
+            f"{llm_key_var} (leave empty to add it to .env yourself later):"
+        ).ask()
+        if llm_api_key:
+            env_updates[llm_key_var] = llm_api_key
+    llm_ready = bool(llm_api_key) or provider == "claude_cli"
 
     # ─── 5. Anki connection ───
     console.print()
@@ -303,7 +422,29 @@ def run_setup() -> None:
     if _sync_skill_trigger_phrases(ui_lang):
         console.print(f"[green]✓[/] Synced skill trigger phrases ({ui_lang})")
 
-    # ─── 7. Daily automation (optional) ───
+    if env_updates:
+        _write_env_secrets(ENV_PATH, env_updates)
+        console.print(f"[green]✓[/] Saved {len(env_updates)} API key(s) to .env")
+
+    # ─── 7. First card (optional) ───
+    console.print()
+    console.print("[cyan]First card[/]")
+    first_card_summary = "skipped — see Next steps below"
+    if llm_ready:
+        generate_now = questionary.confirm(
+            f"Generate your first {min(words_per_day, _FIRST_BATCH_SIZE)} card(s) right now?",
+            default=True,
+        ).ask()
+        if generate_now:
+            first_card_summary = _generate_first_card(words_per_day)
+            console.print(f"[green]✓[/] {first_card_summary}")
+    else:
+        console.print(
+            "[dim]Skipped — no LLM API key entered. Add one to .env, then run "
+            "`ankiforgeai init` and `ankiforgeai ingest topic ...`.[/]"
+        )
+
+    # ─── 8. Daily automation (optional) ───
     console.print()
     console.print("[cyan]Daily automation[/]")
     setup_automation = questionary.confirm(
@@ -321,11 +462,19 @@ def run_setup() -> None:
         console.print(f"[green]✓[/] {message}" if ok else f"[yellow]![/] {message}")
         automation_summary = message if ok else f"failed ({message}) — see README.md"
 
-    # ─── 8. Summary ───
+    # ─── 9. Summary ───
+    next_steps = []
     if provider == "claude_cli":
-        env_step = "  claude login             — one-time, if not already logged in\n"
-    else:
-        env_step = "  cp .env.example .env     — add your API keys\n"
+        next_steps.append("  claude login            — one-time, if not already logged in")
+    elif not env_updates:
+        next_steps.append("  cp .env.example .env    — add your API keys")
+    elif not llm_api_key:
+        next_steps.append(f"  add your LLM key to .env — {llm_key_var}")
+    if not llm_ready or "generated" not in first_card_summary:
+        next_steps.append(
+            "  ankiforgeai init        — creates the DB and Anki Note Type (start Anki first)"
+        )
+    next_steps_text = "\n".join(next_steps) if next_steps else "  You're all set — open Anki!"
 
     console.print()
     console.print(
@@ -338,10 +487,9 @@ def run_setup() -> None:
             f"Images:       {image_provider if show_image else 'no'}\n"
             f"Pronunciation:{transcription if show_pronunciation else 'no'}\n"
             f"Auto-accept:  {'yes' if auto_accept else 'no'}\n"
+            f"First card:   {first_card_summary}\n"
             f"Automation:   {automation_summary}\n\n"
-            "Next steps:\n"
-            f"{env_step}"
-            "  ankiforgeai init         — creates the DB and Anki Note Type (start Anki first)",
+            f"Next steps:\n{next_steps_text}",
             border_style="green",
             title="🎉 AnkiForgeAI is ready!",
         )
