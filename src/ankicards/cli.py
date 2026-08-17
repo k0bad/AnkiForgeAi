@@ -211,13 +211,16 @@ def ingest_url_cmd(
 @ingest_app.command("topic")
 def ingest_topic_cmd(
     topic: str,
-    count: int = typer.Option(20, help="Сколько слов запросить"),
+    count: int | None = typer.Option(
+        None, help="Сколько слов запросить (по умолчанию — ingest.default_count из config.yaml)"
+    ),
     level: str = typer.Option("A2", help="CEFR уровень"),
     as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
 ) -> None:
     """Сгенерировать слова по теме через Claude."""
     cfg = get_config()
     db = _open_db(cfg)
+    count = count if count is not None else cfg.ingest.default_count
 
     async def _run() -> dict:
         if not as_json:

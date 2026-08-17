@@ -7,6 +7,8 @@ Guides user through:
 4. LLM provider + model
 5. Anki connection
 6. Writes config.yaml
+7. Optional: registers the daily-automation cycle with the OS scheduler
+   (Task Scheduler / cron) via .scheduler.register_daily_automation
 """
 from __future__ import annotations
 
@@ -20,6 +22,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from .config import DEFAULT_CONFIG_PATH, PROJECT_ROOT, languages_dir
+from .scheduler import register_daily_automation
 
 LANGUAGES_DIR = languages_dir()
 CONFIG_PATH = DEFAULT_CONFIG_PATH
@@ -300,25 +303,46 @@ def run_setup() -> None:
     if _sync_skill_trigger_phrases(ui_lang):
         console.print(f"[green]✓[/] Synced skill trigger phrases ({ui_lang})")
 
-    # ─── 7. Summary ───
+    # ─── 7. Daily automation (optional) ───
+    console.print()
+    console.print("[cyan]Daily automation[/]")
+    setup_automation = questionary.confirm(
+        "Set up daily automatic card generation (Task Scheduler / cron)?",
+        default=True,
+    ).ask()
+
+    automation_summary = "not set up — see README.md → Automated Daily Cycle"
+    if setup_automation:
+        run_time = (
+            questionary.text("What time should it run? (24h HH:MM)", default="08:00").ask()
+            or "08:00"
+        )
+        ok, message = register_daily_automation(PROJECT_ROOT, run_time)
+        console.print(f"[green]✓[/] {message}" if ok else f"[yellow]![/] {message}")
+        automation_summary = message if ok else f"failed ({message}) — see README.md"
+
+    # ─── 8. Summary ───
     if provider == "claude_cli":
         env_step = "  claude login             — one-time, if not already logged in\n"
     else:
         env_step = "  cp .env.example .env     — add your API keys\n"
 
     console.print()
-    console.print(Panel.fit(
-        "✅ Setup complete!\n\n"
-        f"Language:     {meta['name']}\n"
-        f"Deck:         {meta['anki']['deck_name']}\n"
-        f"Words/day:    {words_per_day}\n"
-        f"LLM:          {model} ({provider})\n"
-        f"Images:       {image_provider if show_image else 'no'}\n"
-        f"Pronunciation:{transcription if show_pronunciation else 'no'}\n"
-        f"Auto-accept:  {'yes' if auto_accept else 'no'}\n\n"
-        "Next steps:\n"
-        f"{env_step}"
-        "  ankiforgeai init         — creates the DB and Anki Note Type (start Anki first)",
-        border_style="green",
-        title="🎉 AnkiForgeAI is ready!",
-    ))
+    console.print(
+        Panel.fit(
+            "✅ Setup complete!\n\n"
+            f"Language:     {meta['name']}\n"
+            f"Deck:         {meta['anki']['deck_name']}\n"
+            f"Words/day:    {words_per_day}\n"
+            f"LLM:          {model} ({provider})\n"
+            f"Images:       {image_provider if show_image else 'no'}\n"
+            f"Pronunciation:{transcription if show_pronunciation else 'no'}\n"
+            f"Auto-accept:  {'yes' if auto_accept else 'no'}\n"
+            f"Automation:   {automation_summary}\n\n"
+            "Next steps:\n"
+            f"{env_step}"
+            "  ankiforgeai init         — creates the DB and Anki Note Type (start Anki first)",
+            border_style="green",
+            title="🎉 AnkiForgeAI is ready!",
+        )
+    )
