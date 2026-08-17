@@ -177,13 +177,41 @@ python scripts/daily_topic.py --topic dyr --count 5 --no-push
 `daily_topic.py` alone does not send notifications — pass `--notify` (which is what
 `daily_topic.sh` does) to fan the report out to every enabled channel in
 `config.yaml -> notifications:`. Two backends today, and both can be enabled at once:
-- `webhook` — POST JSON to any URL (n8n, Zapier, a custom bot gateway)
+- `webhook` — POST JSON to any URL (n8n, Zapier, a custom bot gateway); the URL itself
+  is read from `NOTIFY_WEBHOOK_URL` in `.env`, overriding `notifications[].url` in
+  `config.yaml` when set
 - `telegram` — direct Telegram Bot API call, no intermediary: set `chat_id` (and
   optionally `topic_id`) in `config.yaml`, and the bot token via `NOTIFY_TELEGRAM_TOKEN`
   in `.env` — never in `config.yaml`, which is committed
 
-See `src/ankicards/notify/`. Set up `daily_topic.sh` as a cron job for hands-free daily
+Either way, keep the real address/token out of `config.yaml` (it's committed) — with no
+`.env` override and an empty `config.yaml` value, that channel is skipped (logged as
+`notify.no_url` / `notify.no_token`) instead of failing the run. See
+`src/ankicards/notify/`. Set up `daily_topic.sh` as a cron job for hands-free daily
 vocabulary generation with delivery to your configured channel(s).
+
+### Windows
+
+`daily_topic.sh` needs bash; on Windows use `scripts/daily_topic.ps1` (same
+`--notify` full cycle) with Task Scheduler instead of cron:
+
+```powershell
+# One-off manual run, same as ./scripts/daily_topic.sh
+powershell -File scripts\daily_topic.ps1
+
+# Register a daily trigger (adjust -At to taste)
+$action   = New-ScheduledTaskAction -Execute "powershell.exe" `
+    -Argument '-NoProfile -ExecutionPolicy Bypass -File "<repo-path>\scripts\daily_topic.ps1"'
+$trigger  = New-ScheduledTaskTrigger -Daily -At 8:00am
+$settings = New-ScheduledTaskSettingsSet -WakeToRun -StartWhenAvailable
+Register-ScheduledTask -TaskName "AnkiForgeAI Daily Words" -Action $action `
+    -Trigger $trigger -Settings $settings `
+    -Description "ankicards: generate + auto-push + notify daily vocabulary"
+```
+
+`-WakeToRun` wakes the PC from sleep for the trigger (needs BIOS/power support; won't
+power on from a full shutdown); `-StartWhenAvailable` catches up on the next boot if the
+PC was off at trigger time instead of silently skipping the day.
 
 ## Project Structure
 
