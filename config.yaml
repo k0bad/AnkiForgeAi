@@ -2,7 +2,7 @@
 # Все пути относительные от корня проекта, если не указано иное
 
 # Целевой язык изучения — код профиля из languages/{code}/language.yaml
-language: nb
+language: en
 # Язык подписей на бэк-стороне карточки: "ru" | "en"
 ui_language: ru
 # Тип транскрипции произношения:
@@ -22,7 +22,7 @@ paths:
 anki:
   # AnkiConnect должен быть запущен (Anki desktop + addon 2055492159)
   url: http://127.0.0.1:8765   # заменить на IP твоего Anki (напр. http://100.64.0.1:8765 через Tailscale)
-  deck_name: Norsk
+  deck_name: English
   note_type: LanguageCard       # универсальное имя, создаётся `ankiforgeai init`
                                  # (должно совпадать с anki.note_type в languages/{language}/language.yaml)
   # Имена медиа-файлов: {ID}_nb.mp3 и {ID}.jpg
@@ -56,9 +56,9 @@ llm:
   # (удобно итерировать без рестарта)
 
 tts:
-  # edge-tts голоса для bokmål
-  voice_male: nb-NO-FinnNeural
-  voice_female: nb-NO-PernilleNeural
+  # edge-tts голоса для английского
+  voice_male: en-US-GuyNeural
+  voice_female: en-US-JennyNeural
   default_voice: female
   rate: "+0%"                    # скорость: -50% .. +100%
   pitch: "+0Hz"
