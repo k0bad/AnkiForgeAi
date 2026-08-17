@@ -5,6 +5,11 @@ All notable changes to AnkiForgeAI will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `ankiforgeai about` — prints version and links to the repo/roadmap/changelog/issues.
+  README's `## Roadmap` gained a `### Coming up` list (the open items from
+  `DEVELOPER_GUIDE.md` §10, snapshotted in English) since the existing checklist was
+  almost entirely `[x]` and read more like a changelog than a forward-looking roadmap.
+  The setup wizard's summary panel now also points to `ankiforgeai about`. Part of #58.
 - `ankiforgeai setup` now offers an interactive LLM/image API key entry (written to
   `.env`, masked input via `questionary.password`) followed by an optional "generate
   your first card(s) right now?" step — creates the DB/Note Type, generates a small

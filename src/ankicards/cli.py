@@ -1,6 +1,7 @@
 """CLI точка входа: `ankicards <command>`.
 
 Команды:
+    about                          Версия, ссылки на roadmap/changelog/issues
     ingest url <URL>              Парсинг страницы
     ingest topic <TOPIC>          Генерация по теме через Claude
     review                        Интерактивный ревью pending (нужен TTY)
@@ -26,6 +27,7 @@ import sys
 
 import typer
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
 from .anki.connect import AnkiConnect, AnkiConnectError
@@ -88,6 +90,29 @@ def _open_db(cfg: Config) -> Database:
     except IdMigrationRequiredError as e:
         console.print(f"[red]✗[/] {e}")
         raise typer.Exit(code=1) from e
+
+
+@app.command()
+def about() -> None:
+    """Версия и ссылки: репозиторий, roadmap, changelog, issues."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        pkg_version = version("ankiforgeai")
+    except PackageNotFoundError:
+        pkg_version = "dev (editable install)"
+
+    console.print(
+        Panel.fit(
+            f"AnkiForgeAI v{pkg_version}\n\n"
+            "Repository:  https://github.com/k0bad/AnkiForgeAi\n"
+            "Roadmap:     https://github.com/k0bad/AnkiForgeAi#roadmap\n"
+            "Changelog:   https://github.com/k0bad/AnkiForgeAi/blob/main/CHANGELOG.md\n"
+            "Issues:      https://github.com/k0bad/AnkiForgeAi/issues",
+            border_style="cyan",
+            title="ℹ️  About",
+        )
+    )
 
 
 @app.command()
