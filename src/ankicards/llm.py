@@ -1,14 +1,22 @@
-"""LLM calls with provider selection: Anthropic Claude or OpenAI-compatible (OpenRouter).
+"""LLM calls with provider selection: Anthropic Claude, OpenAI-compatible (OpenRouter),
+or the local Claude Code CLI.
 
 Provider выбирается из config.yaml -> llm.provider:
 - "anthropic"  — использует Anthropic SDK + ANTHROPIC_API_KEY
 - "openrouter" — OpenAI-compatible API через openai SDK (OpenRouter / любые OpenAI-совместимые)
+- "claude_cli" — headless-вызов локального `claude` CLI (`claude -p`, см. _call_claude_cli).
+  Не требует своего ключа в .env — использует уже существующий `claude login` (подписку
+  Pro/Max или ANTHROPIC_API_KEY, настроенный на уровне самого Claude Code). Расходует
+  квоту/rate-limit этого логина совместно с интерактивной работой в Claude Code — не
+  отдельный бюджет. Плохо подходит для частого/объёмного cron именно по этой причине,
+  ок для ручной/нечастой генерации у тех, кто не хочет заводить отдельный API-ключ.
 
 Промпты загружаются из prompts/*.md с подстановкой {placeholders} через str.format.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from typing import Any, cast
@@ -121,9 +129,12 @@ async def call_text(prompt: str, cfg: Config | None = None, model: str | None = 
         return await _call_anthropic(prompt, cfg, model)
     elif provider == "openrouter":
         return await _call_openai(prompt, cfg, model)
+    elif provider == "claude_cli":
+        return await _call_claude_cli(prompt, cfg, model)
     else:
         raise ValueError(
-            f"Неизвестный LLM провайдер: {provider!r}. Ожидается: 'anthropic' или 'openrouter'"
+            f"Неизвестный LLM провайдер: {provider!r}. "
+            "Ожидается: 'anthropic', 'openrouter' или 'claude_cli'"
         )
 
 
@@ -179,6 +190,72 @@ async def _call_openai(prompt: str, cfg: Config, model: str) -> str:
     if not content or not content.strip():
         raise EmptyCompletionError(f"{cfg.llm.provider}/{model} вернул пустой completion")
     return cast(str, content.strip())
+
+
+# ───────────── Claude Code CLI (headless, без ключа) ─────────────
+
+
+@_llm_retry
+async def _call_claude_cli(prompt: str, cfg: Config, model: str) -> str:
+    """Вызвать `claude -p` подпроцессом и вернуть текст из envelope.result.
+
+    Намеренно без --bare: --bare требует ANTHROPIC_API_KEY и никогда не читает
+    OAuth/подписку (см. `claude --help`), а значит убивает смысл этого провайдера —
+    у пользователя с подпиской не будет ключа вовсе. Платим за это более тяжёлым
+    системным промптом на каждый вызов (полный CLAUDE.md/hooks/tools discovery),
+    поэтому этот провайдер — для нечастых ручных вызовов, не для объёмного cron.
+    --tools "" + --permission-mode dontAsk гарантируют, что модель не попытается
+    дёрнуть инструмент и не зависнет в ожидании подтверждения без TTY.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "claude",
+            "-p",
+            prompt,
+            "--model",
+            model,
+            "--output-format",
+            "json",
+            "--tools",
+            "",
+            "--permission-mode",
+            "dontAsk",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            "claude CLI не найден в PATH. Установи Claude Code "
+            "(https://claude.com/claude-code) или используй другой llm.provider."
+        ) from e
+
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=cfg.llm.claude_cli_timeout_seconds
+        )
+    except TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise  # транзиентно для _is_transient — ретраится
+
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"claude CLI завершился с кодом {proc.returncode}: "
+            f"{stderr.decode(errors='replace')[:500]}"
+        )
+
+    try:
+        envelope: dict[str, Any] = json.loads(stdout.decode())
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"claude CLI вернул невалидный JSON-конверт: {stdout[:500]!r}") from e
+
+    if envelope.get("is_error"):
+        raise RuntimeError(f"claude CLI ошибка: {str(envelope.get('result', ''))[:500]}")
+
+    text = str(envelope.get("result") or "").strip()
+    if not text:
+        raise EmptyCompletionError(f"claude_cli/{model} вернул пустой completion")
+    return text
 
 
 # ───────────── JSON parsing ─────────────

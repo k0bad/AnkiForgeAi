@@ -181,15 +181,34 @@ def run_setup() -> None:
             questionary.Choice(
                 "OpenRouter (recommended, many models)", value="openrouter"
             ),
-            questionary.Choice("Anthropic Claude", value="anthropic"),
+            questionary.Choice("Anthropic Claude (API key)", value="anthropic"),
+            questionary.Choice(
+                "Claude Code CLI — no API key, uses your `claude login`"
+                " (Pro/Max subscription or ANTHROPIC_API_KEY at the Claude Code level)",
+                value="claude_cli",
+            ),
         ],
     ).ask()
 
     if provider == "openrouter":
         default_model = "deepseek/deepseek-v4-flash"
+    elif provider == "claude_cli":
+        default_model = "sonnet"
     else:
         default_model = "claude-sonnet-4-5-20250929"
     model = questionary.text("Model name:", default=default_model).ask()
+
+    if provider == "claude_cli":
+        if shutil.which("claude") is None:
+            console.print(
+                "[yellow]⚠ `claude` not found in PATH — install Claude Code first, "
+                "then run `claude login` before using this provider.[/]"
+            )
+        console.print(
+            "[dim]claude_cli shares rate-limit/quota with your interactive Claude Code "
+            "sessions — fine for occasional generation, not recommended for a heavy daily "
+            "cron job.[/]"
+        )
 
     # ─── 5. Anki connection ───
     console.print()
@@ -303,6 +322,11 @@ def run_setup() -> None:
         automation_summary = message if ok else f"failed ({message}) — see README.md"
 
     # ─── 8. Summary ───
+    if provider == "claude_cli":
+        env_step = "  claude login             — one-time, if not already logged in\n"
+    else:
+        env_step = "  cp .env.example .env     — add your API keys\n"
+
     console.print()
     console.print(
         Panel.fit(
@@ -310,14 +334,14 @@ def run_setup() -> None:
             f"Language:     {meta['name']}\n"
             f"Deck:         {meta['anki']['deck_name']}\n"
             f"Words/day:    {words_per_day}\n"
-            f"LLM:          {model}\n"
+            f"LLM:          {model} ({provider})\n"
             f"Images:       {image_provider if show_image else 'no'}\n"
             f"Pronunciation:{transcription if show_pronunciation else 'no'}\n"
             f"Auto-accept:  {'yes' if auto_accept else 'no'}\n"
             f"Automation:   {automation_summary}\n\n"
             "Next steps:\n"
-            "  cp .env.example .env    — add your API keys\n"
-            "  ankiforgeai init        — creates the DB and Anki Note Type (start Anki first)",
+            f"{env_step}"
+            "  ankiforgeai init         — creates the DB and Anki Note Type (start Anki first)",
             border_style="green",
             title="🎉 AnkiForgeAI is ready!",
         )
