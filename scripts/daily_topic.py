@@ -142,6 +142,8 @@ def main() -> None:
                 push_error = f"Ошибка push: {e}"
 
         # ─── 4. Структурированный отчёт ───
+        from ankicards.pipeline import compute_streak
+
         report = {
             "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             "generated_at": _utc_now(),
@@ -158,6 +160,7 @@ def main() -> None:
             "needs_review": needs_review,
             "pushed": pushed,
             "push_error": push_error or None,
+            "streak_days": compute_streak(db),
         }
 
         from ankicards.notify.format import format_report

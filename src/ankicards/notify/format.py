@@ -60,6 +60,13 @@ def format_report(report: dict[str, Any]) -> str:
     else:
         lines.append("📤 Push: нет новых карточек для отправки")
 
+    # streak_days отсутствует целиком для отчётов, собранных до issue #58 (часть #2) —
+    # тогда строку не показываем вовсе, а не "🔥 Стрик: 0 дн.", который выглядел бы
+    # как реальный факт о стрике.
+    if "streak_days" in report:
+        streak = report["streak_days"]
+        lines.append(f"🔥 Стрик: {streak} дн." if streak else "🔥 Стрик прерван")
+
     lines.append("")
     lines.append("✅ Полный цикл завершён автоматически")
     return "\n".join(lines)

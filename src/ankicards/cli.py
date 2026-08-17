@@ -52,7 +52,13 @@ from .log import bound_run, get_logger
 from .migrate_ids import migrate_ids as run_migrate_ids
 from .migrate_ids import needs_migration
 from .models import Status
-from .pipeline import NoteTypeMissingError, check_level_progress, push_approved, run_ingest_pipeline
+from .pipeline import (
+    NoteTypeMissingError,
+    check_level_progress,
+    compute_streak,
+    push_approved,
+    run_ingest_pipeline,
+)
 from .review import actions as review_actions
 from .review.interactive import review_pending
 
@@ -501,15 +507,23 @@ def delete(
 
 @app.command()
 def stats(as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод")) -> None:
-    """Статистика по статусам."""
+    """Статистика по статусам, стрик и общее число слов."""
     cfg = get_config()
     db = _open_db(cfg)
 
     counts = {status.value: len(db.get_by_status(status)) for status in Status}
     anki_cached = len(db.all_anki_words())
+    streak = compute_streak(db)
+    total_words = sum(n for status, n in counts.items() if status != Status.SKIPPED.value)
 
     if as_json:
-        print(json.dumps({**counts, "anki_cache": anki_cached}, ensure_ascii=False, indent=2))
+        payload = {
+            **counts,
+            "anki_cache": anki_cached,
+            "streak_days": streak,
+            "total_words": total_words,
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
         return
 
     table = Table(title="AnkiForgeAI — статистика")
@@ -521,6 +535,10 @@ def stats(as_json: bool = typer.Option(False, "--json", help="Машиночит
     table.add_row("[dim]anki_cache[/]", str(anki_cached))
 
     console.print(table)
+    streak_line = (
+        f"🔥 Стрик: {streak} дн." if streak else "Стрик прерван — запушите что-нибудь сегодня"
+    )
+    console.print(f"{streak_line}   [dim]|[/]   📚 Всего слов: {total_words}")
 
 
 @app.command()

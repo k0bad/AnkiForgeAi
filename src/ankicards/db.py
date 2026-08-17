@@ -219,6 +219,19 @@ class Database:
             result.setdefault(row["level"], {})[row["status"]] = row["n"]
         return result
 
+    def count_pushed_by_date(self) -> dict[str, int]:
+        """{'YYYY-MM-DD': N} — сколько карточек запушено в Anki в этот день, по
+        audit_log (action='push', см. pipeline.push_approved -> _record). Основа для
+        стрика в `stats` — считаем по факту доставки в Anki (source of truth, см.
+        CLAUDE.md принцип 1), а не по date_added (когда карточка просто создана
+        локально, но ещё не обязательно запушена)."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT substr(timestamp, 1, 10) AS day, COUNT(*) AS n "
+                "FROM audit_log WHERE action = 'push' GROUP BY day ORDER BY day"
+            ).fetchall()
+        return {row["day"]: row["n"] for row in rows}
+
     def get_by_id(self, card_id: int) -> Card | None:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM cards WHERE id = ?", (card_id,)).fetchone()
