@@ -248,6 +248,42 @@ CSS = """.card {
     color: var(--ink2);
 }
 
+/* Shown instead of the bg/scrim stack when the card has no Image
+   (design_handoff_image_placeholder) — same footprint as .bg-subject so layout doesn't
+   shift once a real image is added later. */
+.front .bg-empty {
+    position: absolute;
+    top: 2mm;
+    right: 1mm;
+    bottom: 1mm;
+    width: 44%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.5mm;
+    opacity: .55;
+}
+.front .bg-empty .mark {
+    width: 9mm;
+    height: 9mm;
+    border-radius: 50%;
+    border: 1px dashed var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 12pt;
+    color: var(--ink3);
+}
+.front .bg-empty .cap {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 6pt;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink3);
+}
+
 /* ---------- back ---------- */
 
 .back { padding: 4mm 4.5mm 3.5mm; display: flex; flex-direction: column; gap: 2.5mm; }
@@ -267,6 +303,31 @@ CSS = """.card {
     opacity: .1;
     -webkit-mask-image: radial-gradient(ellipse 80% 85% at 60% 55%, #000 46%, transparent 86%);
     mask-image: radial-gradient(ellipse 80% 85% at 60% 55%, #000 46%, transparent 86%);
+}
+
+/* Shown instead of .bg-back when the card has no Image (design_handoff_image_placeholder). */
+.back .bg-back-empty {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 32%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: .55;
+}
+.back .bg-back-empty .mark {
+    width: 6mm;
+    height: 6mm;
+    border-radius: 50%;
+    border: 1px dashed var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 8pt;
+    color: var(--ink3);
 }
 
 .back .header { position: relative; display: flex; gap: 3mm; align-items: center; }
@@ -452,6 +513,15 @@ def _guard(field: NoteFieldDef, inner: str) -> str:
     return f"{{{{#{field.name}}}}}{inner}{{{{/{field.name}}}}}" if field.optional else inner
 
 
+def _guard_with_fallback(field: NoteFieldDef, present: str, absent: str) -> str:
+    """Как _guard, но с явной альтернативой на случай пустого поля — Anki поддерживает
+    инвертированную секцию {{^Field}}...{{/Field}} (рендерится, только если поле пустое)."""
+    return (
+        f"{{{{#{field.name}}}}}{present}{{{{/{field.name}}}}}"
+        f"{{{{^{field.name}}}}}{absent}{{{{/{field.name}}}}}"
+    )
+
+
 def front_template() -> str:
     """HTML фронта: фоновый стек фото (ambient blur + subject + scrim), поверх —
     top-row (POS pill + audio) и word-block (Word + Pronunciation), прижатый вниз."""
@@ -461,12 +531,19 @@ def front_template() -> str:
     image = by_slot.get("front_image")
     if image is not None:
         img = f"{{{{{image.name}}}}}"
-        parts.append(
+        present = (
             f'<div class="{image.css_class or "bg"}">'
             f'<div class="bg-ambient">{img}</div><div class="bg-subject">{img}</div></div>'
             f'<div class="scrim"></div>'
         )
-        parts = [_guard(image, "\n  ".join(parts))]
+        if image.optional:
+            absent = (
+                '<div class="bg-empty"><div class="mark">?</div>'
+                '<div class="cap">no image</div></div>'
+            )
+            parts.append(_guard_with_fallback(image, present, absent))
+        else:
+            parts.append(present)
 
     top_row: list[str] = []
     pos = by_slot.get("pos")
@@ -623,7 +700,12 @@ def _build_back_template() -> str:
     image = by_slot.get("front_image")
     if image is not None:
         img = f"{{{{{image.name}}}}}"
-        parts.append(_guard(image, f'<div class="bg-back">{img}</div>'))
+        present = f'<div class="bg-back">{img}</div>'
+        if image.optional:
+            absent = '<div class="bg-back-empty"><div class="mark">?</div></div>'
+            parts.append(_guard_with_fallback(image, present, absent))
+        else:
+            parts.append(present)
 
     parts.append(_build_header(by_slot))
     parts.append('<div class="divider"></div>')
@@ -658,8 +740,8 @@ def pos_label(pos_value: str) -> str:
 # Гендер-маппинг для языков с артиклями (nb, de, fr, …)
 # В language.yaml для артиклевых языков: gender переводится через forms.noun[gender].label
 # Дополнительный маппинг для норвежского (en/ei/et):
-_GENDER_MAP_NB = {"m": "мужской (en)", "f": "женский (ei)", "n": "средний (et)"}
-_GENDER_MAP_DE = {"m": "мужской (der)", "f": "женский (die)", "n": "средний (das)"}
+_GENDER_MAP_NB = {"m": "Hankjønn (en)", "f": "Hunkjønn (ei)", "n": "Intetkjønn (et)"}
+_GENDER_MAP_DE = {"m": "Maskulinum (der)", "f": "Femininum (die)", "n": "Neutrum (das)"}
 
 _GENDER_MAPS: dict[str, dict[str, str]] = {
     "nb": _GENDER_MAP_NB,

@@ -59,13 +59,17 @@ ingest:
   level_progress_mature_interval_days: 21
 
 llm:
-  # Провайдер: "anthropic" (Claude) или "openrouter" (OpenAI-совместимые)
+  # Провайдер: "anthropic" (Claude API), "openrouter" (OpenAI-совместимые) или
+  # "claude_cli" (локальный `claude` CLI headless, без своего ключа — см. .env.example;
+  # расходует квоту твоей сессии Claude Code, не для частого cron)
   provider: openrouter
-  # Модель у провайдера
+  # Модель у провайдера. Для claude_cli — алиас ("sonnet"/"opus"/"haiku") или полное
+  # имя модели, НЕ формат "provider/model" как у OpenRouter
   model: deepseek/deepseek-v4-flash
   base_url: https://openrouter.ai/api/v1
   max_tokens: 4096
   temperature: 0.3               # ниже = стабильнее для словарных задач
+  claude_cli_timeout_seconds: 120  # таймаут `claude -p` (только provider: claude_cli)
   # Промпты лежат в prompts/, перезагружаются при каждом вызове
   # (удобно итерировать без рестарта)
 

@@ -291,22 +291,43 @@ def run_setup() -> None:
             questionary.Choice(
                 "OpenRouter (recommended, many models)", value="openrouter"
             ),
-            questionary.Choice("Anthropic Claude", value="anthropic"),
+            questionary.Choice("Anthropic Claude (API key)", value="anthropic"),
+            questionary.Choice(
+                "Claude Code CLI — no API key, uses your `claude login`"
+                " (Pro/Max subscription or ANTHROPIC_API_KEY at the Claude Code level)",
+                value="claude_cli",
+            ),
         ],
     ).ask()
 
     if provider == "openrouter":
         default_model = "deepseek/deepseek-v4-flash"
+    elif provider == "claude_cli":
+        default_model = "sonnet"
     else:
         default_model = "claude-sonnet-4-5-20250929"
     model = questionary.text("Model name:", default=default_model).ask()
 
-    llm_key_var = "OPENROUTER_API_KEY" if provider == "openrouter" else "ANTHROPIC_API_KEY"
-    llm_api_key = questionary.password(
-        f"{llm_key_var} (leave empty to add it to .env yourself later):"
-    ).ask()
-    if llm_api_key:
-        env_updates[llm_key_var] = llm_api_key
+    llm_api_key = None
+    if provider == "claude_cli":
+        if shutil.which("claude") is None:
+            console.print(
+                "[yellow]⚠ `claude` not found in PATH — install Claude Code first, "
+                "then run `claude login` before using this provider.[/]"
+            )
+        console.print(
+            "[dim]claude_cli shares rate-limit/quota with your interactive Claude Code "
+            "sessions — fine for occasional generation, not recommended for a heavy daily "
+            "cron job.[/]"
+        )
+    else:
+        llm_key_var = "OPENROUTER_API_KEY" if provider == "openrouter" else "ANTHROPIC_API_KEY"
+        llm_api_key = questionary.password(
+            f"{llm_key_var} (leave empty to add it to .env yourself later):"
+        ).ask()
+        if llm_api_key:
+            env_updates[llm_key_var] = llm_api_key
+    llm_ready = bool(llm_api_key) or provider == "claude_cli"
 
     # ─── 5. Anki connection ───
     console.print()
@@ -409,7 +430,7 @@ def run_setup() -> None:
     console.print()
     console.print("[cyan]First card[/]")
     first_card_summary = "skipped — see Next steps below"
-    if llm_api_key:
+    if llm_ready:
         generate_now = questionary.confirm(
             f"Generate your first {min(words_per_day, _FIRST_BATCH_SIZE)} card(s) right now?",
             default=True,
@@ -443,11 +464,13 @@ def run_setup() -> None:
 
     # ─── 9. Summary ───
     next_steps = []
-    if not env_updates:
+    if provider == "claude_cli":
+        next_steps.append("  claude login            — one-time, if not already logged in")
+    elif not env_updates:
         next_steps.append("  cp .env.example .env    — add your API keys")
     elif not llm_api_key:
         next_steps.append(f"  add your LLM key to .env — {llm_key_var}")
-    if not llm_api_key or "generated" not in first_card_summary:
+    if not llm_ready or "generated" not in first_card_summary:
         next_steps.append(
             "  ankiforgeai init        — creates the DB and Anki Note Type (start Anki first)"
         )
@@ -460,7 +483,7 @@ def run_setup() -> None:
             f"Language:     {meta['name']}\n"
             f"Deck:         {meta['anki']['deck_name']}\n"
             f"Words/day:    {words_per_day}\n"
-            f"LLM:          {model}\n"
+            f"LLM:          {model} ({provider})\n"
             f"Images:       {image_provider if show_image else 'no'}\n"
             f"Pronunciation:{transcription if show_pronunciation else 'no'}\n"
             f"Auto-accept:  {'yes' if auto_accept else 'no'}\n"
