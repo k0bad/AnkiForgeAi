@@ -466,7 +466,8 @@ def run_setup() -> None:
             f"Auto-accept:  {'yes' if auto_accept else 'no'}\n"
             f"First card:   {first_card_summary}\n"
             f"Automation:   {automation_summary}\n\n"
-            f"Next steps:\n{next_steps_text}",
+            f"Next steps:\n{next_steps_text}\n\n"
+            "Tip: `ankiforgeai about` — version, roadmap, changelog links",
             border_style="green",
             title="🎉 AnkiForgeAI is ready!",
         )

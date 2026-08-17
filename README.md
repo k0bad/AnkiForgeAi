@@ -287,6 +287,14 @@ media/                     # Audio, images (gitignored)
 - [x] AI-adjudicated dedupe — ambiguous fuzzy matches are judged by the LLM (same word vs. coincidentally similar), not blindly auto-accepted or left for a human by default
 - [x] PyPI publication — package and release workflow are ready (see `DEVELOPER_GUIDE.md` §12), pending one-time trusted-publisher setup on pypi.org
 
+### Coming up
+
+- [ ] `ankiforgeai config set language.de` — CLI command to switch language without hand-editing `config.yaml`
+- [ ] `parse_mode: MarkdownV2` support with special-character escaping (`notify/webhook.py` currently renders for legacy `parse_mode: Markdown`)
+- [ ] Nynorsk as its own `language.yaml` (`nn`)
+
+See `DEVELOPER_GUIDE.md` §10 for the full, actively-maintained dev-facing plan (this list is a snapshot of it).
+
 ## For Developers
 
 See [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for the full architecture reference, and [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
