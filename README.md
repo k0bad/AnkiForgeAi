@@ -176,10 +176,14 @@ python scripts/daily_topic.py --topic dyr --count 5 --no-push
 
 `daily_topic.py` alone does not send notifications — pass `--notify` (which is what
 `daily_topic.sh` does) to fan the report out to every enabled channel in
-`config.yaml -> notifications:`. Today that's a generic `webhook` backend (POST JSON to
-any URL — n8n, Zapier, a custom bot gateway); see `src/ankicards/notify/`. Set up
-`daily_topic.sh` as a cron job for hands-free daily vocabulary generation with delivery
-to your configured channel.
+`config.yaml -> notifications:`. Two backends today, and both can be enabled at once:
+- `webhook` — POST JSON to any URL (n8n, Zapier, a custom bot gateway)
+- `telegram` — direct Telegram Bot API call, no intermediary: set `chat_id` (and
+  optionally `topic_id`) in `config.yaml`, and the bot token via `NOTIFY_TELEGRAM_TOKEN`
+  in `.env` — never in `config.yaml`, which is committed
+
+See `src/ankicards/notify/`. Set up `daily_topic.sh` as a cron job for hands-free daily
+vocabulary generation with delivery to your configured channel(s).
 
 ## Project Structure
 
@@ -211,7 +215,9 @@ src/ankicards/
 │   └── notetype.py        # Note type definition
 ├── notify/
 │   ├── base.py            # Notifier protocol
-│   └── webhook.py         # Generic webhook backend (n8n, Zapier, ...)
+│   ├── format.py          # Telegram-flavored markdown report renderer (shared)
+│   ├── webhook.py         # Generic webhook backend (n8n, Zapier, ...)
+│   └── telegram.py        # Direct Telegram Bot API backend
 └── review/
     ├── interactive.py     # Rich + questionary UI
     └── actions.py         # Non-interactive accept/skip/suspend/resume/edit/delete
