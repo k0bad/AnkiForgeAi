@@ -740,8 +740,8 @@ def pos_label(pos_value: str) -> str:
 # Гендер-маппинг для языков с артиклями (nb, de, fr, …)
 # В language.yaml для артиклевых языков: gender переводится через forms.noun[gender].label
 # Дополнительный маппинг для норвежского (en/ei/et):
-_GENDER_MAP_NB = {"m": "мужской (en)", "f": "женский (ei)", "n": "средний (et)"}
-_GENDER_MAP_DE = {"m": "мужской (der)", "f": "женский (die)", "n": "средний (das)"}
+_GENDER_MAP_NB = {"m": "Hankjønn (en)", "f": "Hunkjønn (ei)", "n": "Intetkjønn (et)"}
+_GENDER_MAP_DE = {"m": "Maskulinum (der)", "f": "Femininum (die)", "n": "Neutrum (das)"}
 
 _GENDER_MAPS: dict[str, dict[str, str]] = {
     "nb": _GENDER_MAP_NB,
