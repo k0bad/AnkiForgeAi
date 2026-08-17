@@ -122,14 +122,24 @@ class LoggingConfig(BaseModel):
 
 
 class NotificationConfig(BaseModel):
-    """Один канал доставки уведомлений (см. notify/)."""
+    """Один канал доставки уведомлений (см. notify/): "webhook" | "telegram"."""
 
-    type: str = "webhook"  # пока единственный бэкенд: POST JSON на произвольный URL
+    type: str = "webhook"
     enabled: bool = True
+
+    # ── type: webhook ──
     url: str = ""
     # "text" — готовое Telegram-flavored сообщение (для n8n и т.п.);
     # "json" — сырой report целиком, для посредника со своей маршрутизацией (Hermes и т.п.)
     format: str = "text"
+
+    # ── type: telegram (прямой Bot API, без посредника, см. notify/telegram.py) ──
+    # token — реальное значение держим в .env (Secrets.notify_telegram_token,
+    # см. .env.example), не здесь: этот файл коммитится в публичный репозиторий.
+    token: str = ""
+    chat_id: str = ""
+    topic_id: int | None = None  # message_thread_id, для топиков в группах
+    parse_mode: str = "Markdown"
 
 
 class TagsConfig(BaseModel):
@@ -265,6 +275,9 @@ class Secrets(BaseSettings):
     unsplash_access_key: str = ""
     pexels_api_key: str = ""
     pixabay_api_key: str = ""
+    # Переопределяет notifications[].token из config.yaml — тот файл публичный,
+    # реальный bot-токен держим тут (см. notify/telegram.py).
+    notify_telegram_token: str = ""
 
 
 # ───────────── API ─────────────

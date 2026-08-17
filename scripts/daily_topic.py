@@ -149,7 +149,7 @@ def main() -> None:
             "push_error": push_error or None,
         }
 
-        from ankicards.notify.webhook import format_report
+        from ankicards.notify.format import format_report
 
         print(format_report(report))
 

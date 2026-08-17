@@ -21,11 +21,14 @@ from ankicards.config import (
     NotificationConfig,
     PathsConfig,
     ReviewConfig,
+    Secrets,
     TagsConfig,
     TTSConfig,
 )
 from ankicards.notify import dispatch
-from ankicards.notify.webhook import WebhookNotifier, format_report
+from ankicards.notify.format import format_report
+from ankicards.notify.telegram import API_URL, TelegramNotifier
+from ankicards.notify.webhook import WebhookNotifier
 
 
 def _report(**overrides: Any) -> dict[str, Any]:
@@ -179,6 +182,118 @@ async def test_webhook_notifier_raises_on_http_error(monkeypatch: pytest.MonkeyP
         await notifier.send(_report())
 
 
+# ───────────── TelegramNotifier ─────────────
+
+
+def _mock_telegram_transport(handler: Any) -> Any:
+    transport = httpx.MockTransport(handler)
+
+    async def fake_post(self: TelegramNotifier, payload: dict[str, Any]) -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            response = await client.post(API_URL.format(token=self.token), json=payload)
+            response.raise_for_status()
+
+    return fake_post
+
+
+async def test_telegram_notifier_posts_expected_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["json"] = request.read()
+        captured["url"] = str(request.url)
+        return httpx.Response(200, json={"ok": True})
+
+    monkeypatch.setattr(TelegramNotifier, "_post", _mock_telegram_transport(handler))
+
+    notifier = TelegramNotifier(token="123:ABC", chat_id="42")
+    await notifier.send(_report())
+
+    assert captured["url"] == "https://api.telegram.org/bot123:ABC/sendMessage"
+    body = json.loads(captured["json"])
+    assert body["chat_id"] == "42"
+    assert body["parse_mode"] == "Markdown"
+    assert "brød" in body["text"]
+    assert "message_thread_id" not in body
+
+
+async def test_telegram_notifier_includes_message_thread_id_when_topic_id_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["json"] = request.read()
+        return httpx.Response(200, json={"ok": True})
+
+    monkeypatch.setattr(TelegramNotifier, "_post", _mock_telegram_transport(handler))
+
+    notifier = TelegramNotifier(token="123:ABC", chat_id="42", topic_id=115802)
+    await notifier.send(_report())
+
+    body = json.loads(captured["json"])
+    assert body["message_thread_id"] == 115802
+
+
+async def test_telegram_notifier_raises_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        TelegramNotifier, "_post", _mock_telegram_transport(lambda request: httpx.Response(500))
+    )
+
+    notifier = TelegramNotifier(token="123:ABC", chat_id="42")
+    with pytest.raises(httpx.HTTPStatusError):
+        await notifier.send(_report())
+
+
+def test_telegram_from_entry_prefers_env_token_over_config_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "ankicards.notify.telegram.get_secrets",
+        lambda: Secrets(notify_telegram_token="from-env"),
+    )
+    entry = NotificationConfig(type="telegram", token="from-config", chat_id="42")
+
+    notifier = TelegramNotifier.from_entry(entry)
+
+    assert notifier is not None
+    assert notifier.token == "from-env"
+
+
+def test_telegram_from_entry_falls_back_to_config_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "ankicards.notify.telegram.get_secrets", lambda: Secrets(notify_telegram_token="")
+    )
+    entry = NotificationConfig(type="telegram", token="from-config", chat_id="42")
+
+    notifier = TelegramNotifier.from_entry(entry)
+
+    assert notifier is not None
+    assert notifier.token == "from-config"
+
+
+def test_telegram_from_entry_none_without_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "ankicards.notify.telegram.get_secrets", lambda: Secrets(notify_telegram_token="")
+    )
+    entry = NotificationConfig(type="telegram", token="", chat_id="42")
+
+    assert TelegramNotifier.from_entry(entry) is None
+
+
+def test_telegram_from_entry_none_without_chat_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "ankicards.notify.telegram.get_secrets", lambda: Secrets(notify_telegram_token="")
+    )
+    entry = NotificationConfig(type="telegram", token="from-config", chat_id="")
+
+    assert TelegramNotifier.from_entry(entry) is None
+
+
 # ───────────── dispatch ─────────────
 
 
@@ -268,3 +383,54 @@ async def test_dispatch_unknown_backend_type_is_skipped(
     )
 
     await dispatch(_report(), cfg)  # не должно бросить исключение
+
+
+async def test_dispatch_fans_out_to_webhook_and_telegram_together(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+
+    async def fake_webhook_send(self: WebhookNotifier, report: dict[str, Any]) -> None:
+        calls.append(f"webhook:{self.url}")
+
+    async def fake_telegram_send(self: TelegramNotifier, report: dict[str, Any]) -> None:
+        calls.append(f"telegram:{self.chat_id}")
+
+    monkeypatch.setattr(WebhookNotifier, "send", fake_webhook_send)
+    monkeypatch.setattr(TelegramNotifier, "send", fake_telegram_send)
+    monkeypatch.setattr(
+        "ankicards.notify.telegram.get_secrets", lambda: Secrets(notify_telegram_token="")
+    )
+
+    cfg = _make_config(
+        tmp_path,
+        notifications=[
+            NotificationConfig(type="webhook", enabled=True, url="http://n8n.test"),
+            NotificationConfig(
+                type="telegram", enabled=True, token="123:ABC", chat_id="42"
+            ),
+        ],
+    )
+
+    await dispatch(_report(), cfg)
+
+    assert set(calls) == {"webhook:http://n8n.test", "telegram:42"}
+
+
+async def test_dispatch_skips_telegram_channel_without_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fake_send(self: TelegramNotifier, report: dict[str, Any]) -> None:
+        raise AssertionError("should not be called")
+
+    monkeypatch.setattr(TelegramNotifier, "send", fake_send)
+    monkeypatch.setattr(
+        "ankicards.notify.telegram.get_secrets", lambda: Secrets(notify_telegram_token="")
+    )
+
+    cfg = _make_config(
+        tmp_path,
+        notifications=[NotificationConfig(type="telegram", enabled=True, token="", chat_id="42")],
+    )
+
+    await dispatch(_report(), cfg)  # не должно бросить исключение (лог notify.no_token)

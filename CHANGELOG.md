@@ -4,6 +4,19 @@ All notable changes to AnkiForgeAI will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Direct Telegram backend for notifications (`notify/telegram.py`, closes #55): a
+  `type: telegram` channel alongside the existing `webhook`, posting straight to the
+  Telegram Bot API `sendMessage` — no n8n/Zapier relay required. Config gets `chat_id`,
+  `topic_id` (optional, for forum topics) and `parse_mode` on `NotificationConfig`; the
+  bot token lives in `.env` (`NOTIFY_TELEGRAM_TOKEN`, `Secrets.notify_telegram_token`),
+  never in the committed `config.yaml`. Both backends can be enabled at once —
+  `dispatch()` fans out to every enabled channel independently. `_BACKENDS` now maps
+  each type to a `from_entry(NotificationConfig) -> Notifier | None` factory instead of
+  a raw class, since construction differs per backend; `format_report()` moved from
+  `notify/webhook.py` to `notify/format.py` since both backends render the same
+  Telegram-flavored markdown text.
+
 ## [0.4.0] — 2026-08-16
 
 ### Added
