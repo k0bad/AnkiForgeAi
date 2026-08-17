@@ -29,22 +29,22 @@ pos_labels:
 # label — как подпись в таблице на бэк-стороне карточки.
 forms:
   noun:
-    - {key: gender, label: Род}
-    - {key: indefinite_singular, label: Неопр. ед. ч.}
-    - {key: definite_singular, label: Опр. ед. ч.}
-    - {key: indefinite_plural, label: Неопр. мн. ч.}
-    - {key: definite_plural, label: Опр. мн. ч.}
+    - {key: gender, label: Kjønn}
+    - {key: indefinite_singular, label: Ubestemt entall}
+    - {key: definite_singular, label: Bestemt entall}
+    - {key: indefinite_plural, label: Ubestemt flertall}
+    - {key: definite_plural, label: Bestemt flertall}
   verb:
-    - {key: infinitive, label: Инфинитив}
-    - {key: present, label: Настоящее время}
-    - {key: past, label: Прошедшее время}
-    - {key: perfect, label: Перфект}
+    - {key: infinitive, label: Infinitiv}
+    - {key: present, label: Presens}
+    - {key: past, label: Preteritum}
+    - {key: perfect, label: Perfektum}
   adj:
-    - {key: positive_common, label: Общая форма (m/f)}
-    - {key: positive_neuter, label: Форма для ett (n)}
-    - {key: positive_plural, label: Множественное число}
-    - {key: comparative, label: Сравнительная степень}
-    - {key: superlative, label: Превосходная степень}
+    - {key: positive_common, label: "Felleskjønn (m/f)"}
+    - {key: positive_neuter, label: "Intetkjønn (n)"}
+    - {key: positive_plural, label: Flertall}
+    - {key: comparative, label: Komparativ}
+    - {key: superlative, label: Superlativ}
 
 # edge-tts голоса для этого языка
 tts:

@@ -17,9 +17,9 @@ pos_labels:
 
 forms:
   noun:
-    - {key: gender, label: Род}
-    - {key: singular, label: Единственное число}
-    - {key: plural, label: Множественное число}
+    - {key: gender, label: Género}
+    - {key: singular, label: Singular}
+    - {key: plural, label: Plural}
   verb:
     - {key: infinitive, label: Infinitivo}
     - {key: present_yo, label: Presente (yo)}
