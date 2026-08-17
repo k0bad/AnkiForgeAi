@@ -247,17 +247,26 @@ async def enrich_and_generate_media(
             except Exception as e:
                 stats["errors"] += 1
                 _record(db, "warning", "audio_failed", card.id, error=str(e))
-        # Картинки для существительных (если включено в конфиге)
+        # Картинки для существительных (если включено в конфиге). Разбивка по
+        # причине отсутствия (issue #54): "не тот POS" — норма, для остальных
+        # частей речи картинки не ищутся вовсе; "провайдер не нашёл" — пустой
+        # результат поиска или ошибка запроса (403/429/5xx) — это уже повод
+        # чинить провайдера/ключ, а не ожидаемое поведение.
         if cfg.images.enabled and auto_pick_images:
+            stats["images"] = {"found": 0, "skipped_not_noun": 0, "failed_no_result": 0}
             for card in cards:
+                if card.pos.value not in cfg.images.only_for_pos:
+                    stats["images"]["skipped_not_noun"] += 1
+                    continue
                 try:
                     await attach_image(card, cfg, auto_pick=True)
-                    if card.image:
-                        stats.setdefault("images", 0)
-                        stats["images"] += 1
-                        _record(db, "info", "image_generated", card.id)
                 except Exception as e:
                     _record(db, "warning", "image_failed", card.id, error=str(e))
+                if card.image:
+                    stats["images"]["found"] += 1
+                    _record(db, "info", "image_generated", card.id)
+                else:
+                    stats["images"]["failed_no_result"] += 1
 
     return stats, incomplete_ids
 

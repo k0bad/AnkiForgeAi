@@ -40,6 +40,17 @@ SCHEDULE_PATH = PROJECT_ROOT / "data" / "topic_schedule.yaml"
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 
+def _force_utf8_stdio() -> None:
+    """Windows console defaults to cp1251 — принудительно ставим UTF-8 (см. cli.py)."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
+_force_utf8_stdio()
+
+
 def load_schedule() -> dict:
     with SCHEDULE_PATH.open(encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -149,7 +160,7 @@ def main() -> None:
             "push_error": push_error or None,
         }
 
-        from ankicards.notify.webhook import format_report
+        from ankicards.notify.format import format_report
 
         print(format_report(report))
 

@@ -21,6 +21,11 @@ from typing import Any
 import httpx
 
 from .._net import http_retry
+from ..config import NotificationConfig, get_secrets
+from ..log import get_logger
+from .format import format_report
+
+logger = get_logger(__name__)
 
 DEFAULT_TIMEOUT = 10.0
 
@@ -31,6 +36,17 @@ class WebhookNotifier:
         self.format = format
         self._timeout = timeout
 
+    @classmethod
+    def from_entry(cls, entry: NotificationConfig) -> WebhookNotifier | None:
+        # .env (Secrets.notify_webhook_url) переопределяет entry.url из config.yaml —
+        # тот файл коммитится в публичный репозиторий, реальный адрес (может
+        # содержать bot-токен) там намеренно пуст.
+        url = get_secrets().notify_webhook_url or entry.url
+        if not url:
+            logger.warning("notify.no_url", type=entry.type)
+            return None
+        return cls(url=url, format=entry.format)
+
     async def send(self, report: dict[str, Any]) -> None:
         payload = report if self.format == "json" else {"text": format_report(report)}
         await self._post(payload)
@@ -40,48 +56,3 @@ class WebhookNotifier:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.post(self.url, json=payload)
             response.raise_for_status()
-
-
-def format_report(report: dict[str, Any]) -> str:
-    """Отрендерить структурированный отчёт в Telegram-flavored markdown."""
-    label = report.get("label") or report["topic"]
-    lines = [
-        "📚 AnkiForgeAI · ежедневная генерация",
-        "",
-        f"🗓️ День: {report['day']} | Тема: {label} ({report['topic']}) | "
-        f"{report['count']} слов | {report['level']}",
-        f"🕐 {report['generated_at']}",
-        "",
-    ]
-
-    new_words = report.get("new_words") or []
-    if not new_words:
-        lines.append("❌ Не удалось сгенерировать слова (пустой ответ LLM).")
-    else:
-        lines.append(f"✅ Новых слов: {len(new_words)}")
-        for w in new_words:
-            lines.append(f"  • **{w['word']}** ({w['pos']}) — {w['translation']}")
-
-    stats = report.get("stats", {})
-    lines.append("")
-    lines.append(
-        f"📊 Статусы: new={stats.get('new', 0)}, review={stats.get('review', 0)}, "
-        f"merged={stats.get('merged', 0)}, enriched={stats.get('enriched', 0)}, "
-        f"audio={stats.get('audio', 0)}, errors={stats.get('errors', 0)}"
-    )
-
-    if report.get("needs_review"):
-        lines.append(
-            f"⏳ Ждут ручного ревью: {report['needs_review']} карточек (`ankiforgeai review`)"
-        )
-
-    if report.get("pushed"):
-        lines.append(f"📤 Отправлено в Anki: {report['pushed']} карточек")
-    elif report.get("push_error"):
-        lines.append(f"⚠️ Push: {report['push_error']}")
-    else:
-        lines.append("📤 Push: нет новых карточек для отправки")
-
-    lines.append("")
-    lines.append("✅ Полный цикл завершён автоматически")
-    return "\n".join(lines)

@@ -70,7 +70,9 @@ src/ankicards/
 │   └── notetype.py    # Note Type, шаблоны, рендеринг — МУЛЬТИЯЗЫЧНЫЙ
 ├── notify/
 │   ├── base.py         # Notifier protocol
+│   ├── format.py        # format_report() — общий Telegram-flavored markdown рендер
 │   ├── webhook.py       # generic POST JSON бэкенд (n8n/Hermes/Zapier/…), format: text|json
+│   ├── telegram.py      # прямой Telegram Bot API бэкенд, без посредника (issue #55)
 │   └── __init__.py      # dispatch() — фан-аут по cfg.notifications, канал за каналом
 └── review/
     ├── interactive.py # rich + questionary UI (только TTY)
@@ -350,41 +352,59 @@ nb/de/en/es — реализованные профили (`languages/{code}/`).
 
 ---
 
-## 5. Как работает доставка уведомлений (webhook → Telegram и др.)
+## 5. Как работает доставка уведомлений (webhook / telegram)
 
-Уведомления — pluggable слой `src/ankicards/notify/` (см. также `notify/webhook.py`):
-каналы описаны в `config.yaml -> notifications:`, каждый — `{type, enabled, url, format}`.
-Единственный бэкенд пока — `webhook` (generic POST JSON, покрывает n8n/Hermes/Zapier/
-любой свой шлюз-посредник). `format` управляет тем, что летит в теле запроса:
-- `text` (default) — готовое Telegram-flavored сообщение `{"text": "..."}`, под текущий
-  n8n workflow (parse_mode: Markdown).
-- `json` — сырой structured `report` целиком, без форматирования под конкретный
-  мессенджер — для посредника со своей маршрутизацией по каналам (Hermes и т.п.:
-  сам решает, Telegram это, другая соцсеть или AI-агент).
+Уведомления — pluggable слой `src/ankicards/notify/`: каналы описаны в
+`config.yaml -> notifications:`, каждый — `NotificationConfig` (`type`, `enabled`, плюс
+поля своего бэкенда). Два бэкенда сейчас:
 
-Ошибка одного канала логируется и не мешает остальным (`dispatch()` в `notify/__init__.py`).
+- **`webhook`** (`notify/webhook.py`) — generic POST JSON, покрывает n8n/Hermes/Zapier/
+  любой свой шлюз-посредник. Поля `url`, `format` — что летит в теле запроса:
+  - `text` (default) — готовое Telegram-flavored сообщение `{"text": "..."}`, под n8n
+    workflow (parse_mode: Markdown) или прямой relay в Telegram Bot API.
+  - `json` — сырой structured `report` целиком, без форматирования под конкретный
+    мессенджер — для посредника со своей маршрутизацией по каналам (Hermes и т.п.:
+    сам решает, Telegram это, другая соцсеть или AI-агент).
+- **`telegram`** (`notify/telegram.py`, issue #55) — прямой POST на Telegram Bot API
+  `sendMessage`, без посредника. Поля `chat_id`, `topic_id` (опционально —
+  `message_thread_id` для топиков в группах), `parse_mode` (default `Markdown`). Токен
+  не здесь: `Secrets.notify_telegram_token` из `.env` (`NOTIFY_TELEGRAM_TOKEN`) имеет
+  приоритет над `notifications[].token` из committed `config.yaml`.
+
+Оба бэкенда рендерят текст сообщения одинаково — `notify/format.py:format_report()`.
+Каждый бэкенд собирает себя из `NotificationConfig` через классметод `from_entry()`
+(резолвит секреты, если они у него есть); `None` значит "нечем слать" — канал
+пропускается молча, предупреждение уже залогировано внутри `from_entry()`. Ошибка
+одного канала логируется и не мешает остальным (`dispatch()` в `notify/__init__.py`).
+Можно включить оба бэкенда сразу — независимые записи в `notifications:`.
 
 ```
 Cron (Hermes) → daily_topic.sh
   ├─ 1. python daily_topic.py --notify → генерация + AI-дедуп + push
   ├─ 2. ankicards.notify.dispatch(report, cfg) → для каждого enabled-канала:
-  │      webhook.WebhookNotifier.send() → POST payload на cfg.notifications[i].url
-  │      payload = {"text": format_report(report)} если format=text (n8n)
-  │      payload = report                          если format=json (Hermes и т.п.)
-  └─ 3a. n8n workflow "AnkiCards Send Notification" (format=text канал)
+  │      _BACKENDS[entry.type].from_entry(entry) → Notifier | None
+  │      webhook.WebhookNotifier.send()  → POST payload на cfg.notifications[i].url
+  │        payload = {"text": format_report(report)} если format=text (n8n)
+  │        payload = report                          если format=json (Hermes и т.п.)
+  │      telegram.TelegramNotifier.send() → POST {chat_id, text, parse_mode, ...}
+  │        напрямую на api.telegram.org/bot<token>/sendMessage
+  └─ 3a. n8n workflow "AnkiCards Send Notification" (webhook, format=text канал)
         ├─ Webhook → Code: Prepare Message → HTTP Request (Telegram Bot API)
         ├─ chat_id + message_thread_id (настроить в n8n workflow)
         └─ parse_mode: Markdown (поддерживает **bold**, `code`)
-     3b. Hermes/другой шлюз (format=json канал, если настроен) — сам решает
+     3b. Hermes/другой шлюз (webhook, format=json канал, если настроен) — сам решает
         маршрутизацию по структурированным полям report
+     3c. telegram-канал (если настроен) — минует n8n/Hermes целиком
 ```
 
 Добавить канал (Slack/Discord/…) — новый файл `notify/<name>.py` с классом,
-у которого есть `async def send(self, report: dict) -> None`, плюс запись в
+у которого есть `async def send(self, report: dict) -> None` и классметод
+`from_entry(cls, entry: NotificationConfig) -> Notifier | None`, плюс запись в
 `_BACKENDS` в `notify/__init__.py`. Правка `daily_topic.py`/`.sh` не нужна.
 
 **Почему n8n, а не Hermes gateway:** gateway сейчас нестабилен (конфликт двух профилей).  
-n8n шлёт напрямую через Telegram Bot API — надёжнее, как weather-workflow.
+n8n шлёт напрямую через Telegram Bot API — надёжнее, как weather-workflow. `telegram`
+бэкенд (issue #55) даёт третий путь — вообще без n8n, для тех, кому посредник не нужен.
 
 ---
 
@@ -523,6 +543,7 @@ curl -X POST http://<n8n-host>:5678/webhook/ankicards-notify -H 'Content-Type: a
 - [x] AI-адъюдикация дедупа (`dedupe.ai_adjudication`, `dedupe.judge_review`) — LLM решает SAME/DIFFERENT
       для нечётких совпадений вместо автоматического ухода в ревью
 - [x] Pluggable-каналы уведомлений (`notify/`, generic webhook: n8n/Zapier/Hermes/…)
+- [x] Прямой Telegram-бэкенд как альтернатива webhook, без n8n (issue #55)
 - [x] Fallback-цепочка провайдеров картинок (`images.fallback_providers`)
 - [x] Интерактивный выбор картинки в `review` вместо автовыбора первого результата (issue #36)
 - [x] Последовательные переиспользуемые `card.id` вместо UUID + команда `delete` (см. §6, `migrate_ids.py`)

@@ -92,3 +92,22 @@ def _check_card(card: Card, cfg: Config) -> list[Inconsistency]:
         )
 
     return problems
+
+
+def count_images_skipped_not_noun(cards: list[Card], cfg: Config) -> int:
+    """Карточки без картинки, у которых это ожидаемо: pos не входит в
+    images.only_for_pos, значит картинка и не должна была появиться (issue #54).
+
+    Намеренно не Inconsistency — это не расхождение, а справочное число для
+    вывода CLI-команды doctor, чтобы отличать "нормально, не тот POS" от
+    check="images.enabled" выше (провайдер не нашёл — уже флагуется как проблема).
+    """
+    if not cfg.images.enabled:
+        return 0
+    return sum(
+        1
+        for card in cards
+        if card.status in _CHECKED_STATUSES
+        and card.pos.value not in cfg.images.only_for_pos
+        and not card.image
+    )
