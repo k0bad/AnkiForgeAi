@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from datetime import date, timedelta
 
 from .anki.connect import AnkiConnect, AnkiConnectError
 from .anki.notetype import _get_note_type_name as get_note_type_name
@@ -443,3 +444,23 @@ async def check_level_progress(db: Database, anki: AnkiConnect, cfg: Config) -> 
                 }
             )
     return hints
+
+
+def compute_streak(db: Database, today: date | None = None) -> int:
+    """Consecutive days up to `today` (default: real today) with >=1 card pushed.
+
+    If nothing has been pushed yet today, counts back from yesterday instead of
+    reporting 0 — otherwise every streak would look broken each morning before
+    that day's daily-automation run has had a chance to push anything (see
+    scripts/daily_topic.py). Based on db.count_pushed_by_date (audit_log), not
+    Card.date_added — see that method's docstring for why.
+    """
+    pushed_by_date = db.count_pushed_by_date()
+    today = today or date.today()
+    day = today if pushed_by_date.get(today.isoformat()) else today - timedelta(days=1)
+
+    streak = 0
+    while pushed_by_date.get(day.isoformat()):
+        streak += 1
+        day -= timedelta(days=1)
+    return streak

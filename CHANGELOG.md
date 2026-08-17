@@ -5,6 +5,14 @@ All notable changes to AnkiForgeAI will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `ankiforgeai stats` now shows a push streak and a total-words counter:
+  `db.count_pushed_by_date()` groups `audit_log`'s `push` events by day, and
+  `pipeline.compute_streak()` counts consecutive days up to today with >=1 card
+  pushed — falling back to counting from yesterday if today's daily-automation run
+  hasn't happened yet, so the streak doesn't look broken every morning. Streak is
+  based on actual Anki delivery (`audit_log`), not `Card.date_added`, consistent with
+  "Anki is the source of truth" (see `CLAUDE.md`). `scripts/daily_topic.py`'s report
+  (and `notify/format.py`) now include the streak too. Part of #58.
 - `ankiforgeai about` — prints version and links to the repo/roadmap/changelog/issues.
   README's `## Roadmap` gained a `### Coming up` list (the open items from
   `DEVELOPER_GUIDE.md` §10, snapshotted in English) since the existing checklist was
