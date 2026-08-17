@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
@@ -147,3 +148,106 @@ async def test_call_openai_raises_empty_completion_error_after_exhausting_retrie
         await llm._call_openai("промпт", cfg, "some-model")
 
     assert fake_client.chat.completions.call_count == 3
+
+
+class _FakeProcess:
+    """Имитирует asyncio.subprocess.Process для _call_claude_cli."""
+
+    def __init__(self, stdout: bytes, stderr: bytes = b"", returncode: int = 0) -> None:
+        self._stdout = stdout
+        self._stderr = stderr
+        self.returncode = returncode
+        self.killed = False
+
+    async def communicate(self) -> tuple[bytes, bytes]:
+        return self._stdout, self._stderr
+
+    def kill(self) -> None:
+        self.killed = True
+
+    async def wait(self) -> None:
+        return None
+
+
+def _envelope(**kwargs: object) -> bytes:
+    return json.dumps(kwargs).encode()
+
+
+async def test_call_claude_cli_parses_result_field(
+    tmp_path,  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _make_config(tmp_path)
+    fake_proc = _FakeProcess(_envelope(is_error=False, result="готовый ответ"))
+
+    async def fake_exec(*args: object, **kwargs: object) -> _FakeProcess:
+        return fake_proc
+
+    monkeypatch.setattr(llm.asyncio, "create_subprocess_exec", fake_exec)
+
+    result = await llm._call_claude_cli("промпт", cfg, "sonnet")
+
+    assert result == "готовый ответ"
+
+
+async def test_call_claude_cli_raises_on_is_error(
+    tmp_path,  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _make_config(tmp_path)
+    fake_proc = _FakeProcess(_envelope(is_error=True, result="что-то сломалось"))
+
+    async def fake_exec(*args: object, **kwargs: object) -> _FakeProcess:
+        return fake_proc
+
+    monkeypatch.setattr(llm.asyncio, "create_subprocess_exec", fake_exec)
+
+    with pytest.raises(RuntimeError, match="что-то сломалось"):
+        await llm._call_claude_cli("промпт", cfg, "sonnet")
+
+
+async def test_call_claude_cli_nonzero_exit_raises_runtime_error(
+    tmp_path,  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _make_config(tmp_path)
+    fake_proc = _FakeProcess(b"", stderr=b"auth error", returncode=1)
+
+    async def fake_exec(*args: object, **kwargs: object) -> _FakeProcess:
+        return fake_proc
+
+    monkeypatch.setattr(llm.asyncio, "create_subprocess_exec", fake_exec)
+
+    with pytest.raises(RuntimeError, match="завершился с кодом 1"):
+        await llm._call_claude_cli("промпт", cfg, "sonnet")
+
+
+async def test_call_claude_cli_missing_binary_raises_runtime_error(
+    tmp_path,  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _make_config(tmp_path)
+
+    async def fake_exec(*args: object, **kwargs: object) -> _FakeProcess:
+        raise FileNotFoundError()
+
+    monkeypatch.setattr(llm.asyncio, "create_subprocess_exec", fake_exec)
+
+    with pytest.raises(RuntimeError, match="не найден в PATH"):
+        await llm._call_claude_cli("промпт", cfg, "sonnet")
+
+
+async def test_call_claude_cli_empty_result_raises_empty_completion_error(
+    tmp_path,  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _make_config(tmp_path)
+    fake_proc = _FakeProcess(_envelope(is_error=False, result=""))
+
+    async def fake_exec(*args: object, **kwargs: object) -> _FakeProcess:
+        return fake_proc
+
+    monkeypatch.setattr(llm.asyncio, "create_subprocess_exec", fake_exec)
+
+    with pytest.raises(EmptyCompletionError):
+        await llm._call_claude_cli("промпт", cfg, "sonnet")

@@ -31,7 +31,7 @@ Built-in languages: 🇳🇴 Norwegian Bokmål (`nb`), 🇩🇪 German (`de`), �
 | **Pluggable image provider** | `images.provider`: Unsplash, Pexels, Pixabay, or key-free Openverse — legal, free tiers |
 | **Selectable transcription** | `transcription`: `practical` (Cyrillic respelling) or `ipa` — pronunciation hints aren't hardcoded to Russian speakers |
 | **Prompts in `prompts/*.md`** | Improve card quality without touching code |
-| **Any LLM provider** | OpenRouter or Anthropic Claude |
+| **Any LLM provider** | OpenRouter, Anthropic Claude, or the local `claude` CLI (`claude_cli` — no API key, reuses your `claude login`; shares that quota with interactive Claude Code use, so better for occasional generation than heavy cron) |
 
 ## Card statuses
 
@@ -98,6 +98,10 @@ ankiforgeai setup             # writes config.yaml in the current directory
 ankiforgeai init              # creates the local DB and the Anki Note Type
 ```
 
+`ankiforgeai setup` will ask which LLM provider to use. Pick **"Claude Code CLI"** if you
+don't want to set up a separate API key — see [No API subscription?](#no-api-subscription-use-your-claude-code-login)
+below for what that needs and what it trades off.
+
 `config.yaml`, `data/`, and `media/` are created in whatever directory you run `ankiforgeai` from — `cd` into a project folder first (e.g. `mkdir ~/ankiforgeai && cd ~/ankiforgeai`).
 
 `setup` also asks for your LLM/image API keys directly (masked input, written to
@@ -127,6 +131,35 @@ cp config.yaml.example config.yaml
 # Initialize (DB + Anki Note Type)
 ankiforgeai init
 ```
+
+### No API subscription? Use your Claude Code login
+
+If you already have [Claude Code](https://claude.com/claude-code) installed and logged in
+(Pro/Max subscription, or an `ANTHROPIC_API_KEY` configured at the Claude Code level) you
+can skip getting a separate OpenRouter/Anthropic key for this project entirely:
+
+```bash
+claude login          # one-time, skip if already logged in
+```
+
+Then in `config.yaml`:
+
+```yaml
+llm:
+  provider: claude_cli   # instead of openrouter/anthropic
+  model: sonnet           # alias — "sonnet" | "opus" | "haiku", not a provider/model string
+```
+
+`.env` needs no `OPENROUTER_API_KEY`/`ANTHROPIC_API_KEY` in this mode — `ankiforgeai setup`
+sets this up for you if you pick "Claude Code CLI" at the provider prompt. Under the hood
+this runs `claude -p` as a subprocess (see `src/ankicards/llm.py::_call_claude_cli`).
+
+**Trade-off:** each call goes through your existing Claude Code session and shares its
+rate-limit/quota with whatever else you use Claude Code for interactively — it is not a
+separate billing pool. Fine for occasional/manual generation (`ankiforgeai ingest topic ...`
+run by hand); not recommended for the unattended daily cron cycle below if you also do
+heavy interactive Claude Code work on the same account, since a large batch could eat into
+quota you'd rather have during the day.
 
 ## Usage
 
