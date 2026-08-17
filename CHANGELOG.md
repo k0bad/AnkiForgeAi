@@ -5,6 +5,16 @@ All notable changes to AnkiForgeAI will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `ankiforgeai setup` now offers to register the daily-automation cycle with the OS
+  scheduler on the spot (`src/ankicards/scheduler.py`): Task Scheduler on Windows via
+  `Register-ScheduledTask -Force` (idempotent re-registration), cron elsewhere via a
+  marker-commented `crontab` line (re-running replaces the old entry instead of
+  duplicating it). Previously this required manually following `README.md` ->
+  `Automated Daily Cycle`, which stays as the manual/inspectable path. Part of #58.
+- Fixed dead `ingest.default_count` config: `ankiforgeai ingest topic` was ignoring it
+  and always defaulting `--count` to a hardcoded 20 regardless of what `setup`'s "words
+  per day" question wrote to `config.yaml`. `--count` now falls back to
+  `ingest.default_count` when omitted. Part of #58.
 - Direct Telegram backend for notifications (`notify/telegram.py`, closes #55): a
   `type: telegram` channel alongside the existing `webhook`, posting straight to the
   Telegram Bot API `sendMessage` — no n8n/Zapier relay required. Config gets `chat_id`,
