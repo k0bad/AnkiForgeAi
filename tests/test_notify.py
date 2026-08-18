@@ -81,7 +81,8 @@ def test_format_report_includes_new_words() -> None:
     text = format_report(_report())
     assert "brød" in text
     assert "хлеб" in text
-    assert "еда (mat)" in text
+    assert "еда" in text
+    assert "(mat)" not in text  # внутренний ключ topic не должен светиться пользователю
 
 
 def test_format_report_empty_new_words() -> None:

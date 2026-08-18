@@ -11,12 +11,14 @@ from typing import Any
 
 def format_report(report: dict[str, Any]) -> str:
     """Отрендерить структурированный отчёт в Telegram-flavored markdown."""
+    # report['topic'] — внутренний ключ расписания (data/topic_schedule.yaml), не связан
+    # с активным языком изучения (config.yaml -> language) и исторически на норвежском
+    # (mat/dyr/...) — пользователю показываем только уже локализованный label.
     label = report.get("label") or report["topic"]
     lines = [
         "📚 AnkiForgeAI · ежедневная генерация",
         "",
-        f"🗓️ День: {report['day']} | Тема: {label} ({report['topic']}) | "
-        f"{report['count']} слов | {report['level']}",
+        f"🗓️ День: {report['day']} | Тема: {label} | {report['count']} слов | {report['level']}",
         f"🕐 {report['generated_at']}",
         "",
     ]
