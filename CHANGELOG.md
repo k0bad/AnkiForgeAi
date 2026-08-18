@@ -4,6 +4,8 @@ All notable changes to AnkiForgeAI will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-08-18
+
 ### Added
 - `ankiforgeai stats` now shows a push streak and a total-words counter:
   `db.count_pushed_by_date()` groups `audit_log`'s `push` events by day, and
@@ -37,6 +39,34 @@ All notable changes to AnkiForgeAI will be documented in this file.
   and always defaulting `--count` to a hardcoded 20 regardless of what `setup`'s "words
   per day" question wrote to `config.yaml`. `--count` now falls back to
   `ingest.default_count` when omitted. Part of #58.
+- `llm.provider: claude_cli` — shells out to the local `claude -p` CLI instead of the
+  OpenRouter/Anthropic HTTP APIs, reusing an existing `claude login` (Pro/Max
+  subscription or `ANTHROPIC_API_KEY` at the Claude Code level) so users without a
+  separate `.env` key can still generate cards (`llm.py::_call_claude_cli`,
+  `llm.claude_cli_timeout_seconds`). Deliberately skips `--bare` (it requires its own
+  `ANTHROPIC_API_KEY` and never reads OAuth, which would defeat the point), so calls
+  share rate-limit/quota with interactive Claude Code usage rather than a dedicated
+  budget — documented as fine for occasional manual generation, not high-volume cron.
+  `ankiforgeai setup` offers it as a third provider choice (PATH check for the `claude`
+  binary + a quota-sharing heads-up) and skips the "add your API keys" step when picked;
+  README gained a no-subscription walkthrough.
+- A themed empty-state placeholder (dashed circle badge + caption) now renders on both
+  card faces when `Image` is empty, adapted from the `design_handoff_image_placeholder`
+  design into the card's existing color tokens — shows for *any* card without an image,
+  not just a failed search on a noun, so verbs/adjectives/adverbs (never searched, per
+  `images.only_for_pos`) get a deliberate marker instead of blank space.
+- `stats["images"]` (closes #54) is now a `{found, skipped_not_noun, failed_no_result}`
+  breakdown instead of a single counter: `notify/format.py`'s report renders it as a
+  🖼️ line, and `doctor` surfaces `skipped_not_noun` as a separate informational line
+  (not an `Inconsistency` — JSON output/exit code unchanged) via
+  `doctor.count_images_skipped_not_noun()`.
+- `ingest topic`/`ingest url` now report card counts per CEFR level (total + pushed),
+  and `push` hints when a level looks well-reviewed in Anki and it's time to move to
+  the next one — thresholds derived from published CEFR vocabulary-size research,
+  halved since this deck is only part of a learner's overall exposure.
+- `ankiforgeai init` now warns (doesn't auto-fix) when a Note Type's actual field list
+  in Anki has drifted from `anki.fields` in `language.yaml` — previously this went
+  unnoticed silently since only CSS/templates were kept in sync.
 - Direct Telegram backend for notifications (`notify/telegram.py`, closes #55): a
   `type: telegram` channel alongside the existing `webhook`, posting straight to the
   Telegram Bot API `sendMessage` — no n8n/Zapier relay required. Config gets `chat_id`,
@@ -62,6 +92,16 @@ All notable changes to AnkiForgeAI will be documented in this file.
   is now in `.gitignore`; the repo ships `config.yaml.example` as the template. One-time setup:
   `cp config.yaml.example config.yaml` (also done automatically by `ankiforgeai setup`). See
   `DEVELOPER_GUIDE.md` §11 for the one-time migration steps on existing checkouts.
+
+### Fixed
+- Forms-grid labels (gender/number/tense) in the nb/de/es language profiles, and noun
+  gender (masculine/feminine/neuter) rendered by `_GENDER_MAP_NB`/`_GENDER_MAP_DE` in
+  `notetype.py`, were hardcoded in Russian instead of the target language — leaking
+  `ui_language` text into card fields that should stay in the language being learned.
+  Fixed at the source in the language profiles/`notetype.py`, and retroactively patched
+  on already-pushed Norsk cards via AnkiConnect (re-scanned all 110 pushed notes across
+  the English/Norsk decks for stray Cyrillic outside `Translation`/`ExampleTranslation`
+  afterward — 0 hits).
 
 ## [0.4.0] — 2026-08-16
 
