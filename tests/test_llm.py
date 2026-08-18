@@ -125,7 +125,7 @@ async def test_call_openai_retries_past_transient_empty_completion(
     в вызывающий код как валидный (но бессмысленный) результат."""
     cfg = _make_config(tmp_path)
     fake_client = _FakeOpenAIClient(["", None, "настоящий ответ"])
-    monkeypatch.setattr(llm, "_client_openai", lambda cfg: fake_client)
+    monkeypatch.setattr(llm, "_client_openai", lambda cfg, **kw: fake_client)
 
     result = await llm._call_openai("промпт", cfg, "some-model")
 
@@ -141,7 +141,7 @@ async def test_call_openai_raises_empty_completion_error_after_exhausting_retrie
     EmptyCompletionError, а не тихо возвращаем "" вызывающему коду."""
     cfg = _make_config(tmp_path)
     fake_client = _FakeOpenAIClient(["", "", ""])
-    monkeypatch.setattr(llm, "_client_openai", lambda cfg: fake_client)
+    monkeypatch.setattr(llm, "_client_openai", lambda cfg, **kw: fake_client)
 
     with pytest.raises(EmptyCompletionError):
         await llm._call_openai("промпт", cfg, "some-model")
