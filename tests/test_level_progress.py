@@ -56,7 +56,9 @@ def _make_config(tmp_path: Path, ingest: IngestConfig | None = None) -> Config:
 
 
 def _card(word: str, level: Level | None, status: Status) -> Card:
-    return Card(word=word, pos=POS.NOUN, translation="перевод", level=level, status=status)
+    return Card(
+        language="nb", word=word, pos=POS.NOUN, translation="перевод", level=level, status=status
+    )
 
 
 @pytest.fixture

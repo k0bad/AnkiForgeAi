@@ -21,7 +21,7 @@ from typing import Any, cast
 import httpx
 
 from .._net import http_retry
-from ..config import Config
+from ..config import Config, resolve_anki_profile
 from ..log import get_logger
 
 logger = get_logger(__name__)
@@ -38,9 +38,10 @@ class AnkiConnect:
     """Тонкая обёртка над AnkiConnect API."""
 
     def __init__(self, cfg: Config, timeout: float = DEFAULT_TIMEOUT) -> None:
-        self.url = cfg.anki.url
-        self.deck = cfg.anki.deck_name
-        self.note_type = cfg.anki.note_type
+        profile = resolve_anki_profile(cfg)
+        self.url = profile.url
+        self.deck = profile.deck_name
+        self.note_type = profile.note_type
         self._timeout = timeout
 
     @http_retry

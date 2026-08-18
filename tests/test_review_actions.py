@@ -32,7 +32,7 @@ from ankicards.review import actions
 
 
 def _card(word: str, status: Status = Status.REVIEW) -> Card:
-    return Card(word=word, pos=POS.NOUN, translation="дом", status=status)
+    return Card(language="nb", word=word, pos=POS.NOUN, translation="дом", status=status)
 
 
 def _make_config(tmp_path: Path) -> Config:
@@ -139,6 +139,38 @@ def test_edit_card_updates_fields_and_logs_action(db: Database) -> None:
 def test_set_status_raises_on_missing_card(db: Database) -> None:
     with pytest.raises(ValueError, match="не найдены"):
         actions.skip_cards([999], db)
+
+
+def test_skip_cards_rejects_id_from_different_language(db: Database) -> None:
+    """Issue #63: --language на review-командах должен ловить чужой-язык id
+    (устаревший список, опечатка) жёсткой ошибкой, а не тихим действием над
+    карточкой другого языка."""
+    nb_card = _card("hus")
+    de_card = Card(
+        language="de", word="Haus", pos=POS.NOUN, translation="дом", status=Status.REVIEW
+    )
+    db.insert_card(nb_card)
+    db.insert_card(de_card)
+
+    with pytest.raises(ValueError, match="другого языка"):
+        actions.skip_cards([nb_card.id, de_card.id], db, language="nb")
+
+    # Ошибка — до начала цикла обновлений: ни одна карточка не тронута.
+    saved_nb = db.get_by_id(nb_card.id)
+    saved_de = db.get_by_id(de_card.id)
+    assert saved_nb is not None and saved_nb.status == Status.REVIEW
+    assert saved_de is not None and saved_de.status == Status.REVIEW
+
+
+def test_skip_cards_accepts_matching_language(db: Database) -> None:
+    card = _card("hus")
+    db.insert_card(card)
+
+    actions.skip_cards([card.id], db, language="nb")
+
+    saved = db.get_by_id(card.id)
+    assert saved is not None
+    assert saved.status == Status.SKIPPED
 
 
 async def test_delete_cards_removes_pushed_note_and_row(db: Database) -> None:

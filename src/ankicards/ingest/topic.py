@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+from ..config import get_config
 from ..llm import call_json, load_prompt
 from ..models import POS, Card, Level, Status
 
@@ -39,14 +40,15 @@ async def ingest_by_topic(
     if not isinstance(raw_items, list):
         raise ValueError(f"LLM вернул не массив: {type(raw_items).__name__}")
 
+    language = get_config().language
     return [
-        _to_card(item, topic=topic, level=level)
+        _to_card(item, topic=topic, level=level, language=language)
         for item in raw_items
         if isinstance(item, dict) and item.get("word") and item.get("translation")
     ]
 
 
-def _to_card(item: dict, topic: str, level: str) -> Card:
+def _to_card(item: dict, topic: str, level: str, language: str) -> Card:
     pos_raw = str(item.get("pos", "other")).lower()
     try:
         pos = POS(pos_raw)
@@ -60,6 +62,7 @@ def _to_card(item: dict, topic: str, level: str) -> Card:
         level_enum = None
 
     return Card(
+        language=language,
         word=str(item["word"]).strip(),
         pos=pos,
         translation=str(item["translation"]).strip(),

@@ -50,7 +50,7 @@ def _make_config(tmp_path: Path) -> Config:
 
 
 def _card(word: str) -> Card:
-    return Card(word=word, pos=POS.NOUN, translation="дом", status=Status.REVIEW)
+    return Card(language="nb", word=word, pos=POS.NOUN, translation="дом", status=Status.REVIEW)
 
 
 @pytest.fixture

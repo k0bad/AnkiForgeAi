@@ -47,8 +47,8 @@ def check_card(card: Card, db: Database, cfg: Config) -> Decision:
     enrich/media — см. db.py::_next_free_id), так что уже проверенные в этом
     же прогоне карточки видны здесь через staging без отдельного механизма.
     """
-    staging = db.all_words()
-    anki_cache = [(str(nid), w) for nid, w in db.all_anki_words()]
+    staging = db.all_words(card.language)
+    anki_cache = [(str(nid), w) for nid, w in db.all_anki_words(card.language)]
     candidates = [c for c in staging + anki_cache if c[0] != str(card.id)]
 
     if not candidates:

@@ -10,7 +10,7 @@ from ankicards.models import POS, Card
 
 
 def _card(word: str = "hus", translation: str = "") -> Card:
-    return Card(word=word, pos=POS.NOUN, translation=translation)
+    return Card(language="nb", word=word, pos=POS.NOUN, translation=translation)
 
 
 async def test_structured_response_fills_translation_and_image_query(

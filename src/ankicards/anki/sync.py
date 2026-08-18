@@ -13,7 +13,7 @@ pipeline.delete_card_record). Ложные срабатывания от сме�
 
 from __future__ import annotations
 
-from ..config import Config
+from ..config import Config, resolve_anki_profile
 from ..db import Database
 from ..log import get_logger
 from ..pipeline import delete_card_record
@@ -34,10 +34,14 @@ _MASS_DELETE_MIN_COUNT = 3
 
 async def sync_anki_to_cache(db: Database, anki: AnkiConnect, cfg: Config) -> int:
     """Скачать все заметки из Anki deck в anki_cache. Вернуть количество."""
-    query = f'deck:"{cfg.anki.deck_name}"'
-    logger.info("anki_sync.start", deck=cfg.anki.deck_name)
+    deck = resolve_anki_profile(cfg).deck_name
+    query = f'deck:"{deck}"'
+    logger.info("anki_sync.start", deck=deck)
 
-    previous_note_ids = {note_id for note_id, _ in db.all_anki_words()}
+    # Фильтр по языку (issue #63) — иначе кэш других языков виделся бы здесь как
+    # "исчезнувший" на каждом sync: fresh_note_ids ограничен этим deck'ом (query
+    # выше), а без фильтра previous_note_ids тянет ноуты вообще всех языков.
+    previous_note_ids = {note_id for note_id, _ in db.all_anki_words(cfg.language)}
     note_ids = await anki.find_notes(query)
     fresh_note_ids = {int(nid) for nid in note_ids}
 
@@ -56,19 +60,20 @@ async def sync_anki_to_cache(db: Database, anki: AnkiConnect, cfg: Config) -> in
             tags = info.get("tags", []) or []
             db.upsert_anki_note(
                 note_id=int(note_id),
+                language=cfg.language,
                 word=word,
                 fields=fields,
                 tags=list(tags),
             )
             total += 1
 
-    _handle_vanished_notes(previous_note_ids - fresh_note_ids, db)
+    _handle_vanished_notes(previous_note_ids - fresh_note_ids, db, language=cfg.language)
 
-    logger.info("anki_sync.done", deck=cfg.anki.deck_name, count=total)
+    logger.info("anki_sync.done", deck=deck, count=total)
     return total
 
 
-def _handle_vanished_notes(vanished: set[int], db: Database) -> None:
+def _handle_vanished_notes(vanished: set[int], db: Database, language: str) -> None:
     """note_id, которые раньше были в кэше и пропали из свежего findNotes().
 
     Кэш для них чистится всегда. Если пропавший note_id привязан к одной из
@@ -88,7 +93,10 @@ def _handle_vanished_notes(vanished: set[int], db: Database) -> None:
     if not linked_cards:
         return
 
-    total_tracked = db.count_cards_with_anki_note_id()
+    # language=... (issue #63): без фильтра по языку массовое удаление ноутов
+    # ОДНОГО языка размывается знаменателем по всем языкам в базе — guard может
+    # не сработать, когда как раз должен (см. count_cards_with_anki_note_id).
+    total_tracked = db.count_cards_with_anki_note_id(language)
     if (
         len(linked_cards) >= _MASS_DELETE_MIN_COUNT
         and total_tracked
