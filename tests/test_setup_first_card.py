@@ -139,7 +139,7 @@ def test_generate_first_card_success(tmp_path: Path, monkeypatch: pytest.MonkeyP
     async def fake_ingest(
         topic: str, count: int, level: str, exclude_words: list[str]
     ) -> list[Card]:
-        return [Card(word="hus", pos=POS.NOUN, translation="dom")]
+        return [Card(language="nb", word="hus", pos=POS.NOUN, translation="dom")]
 
     async def fake_pipeline(cards: list[Card], db: Any, cfg: Any) -> dict:
         return await _stats(cards)
@@ -181,7 +181,7 @@ def test_generate_first_card_anki_unreachable_falls_back(
     async def fake_ingest(
         topic: str, count: int, level: str, exclude_words: list[str]
     ) -> list[Card]:
-        return [Card(word="hus", pos=POS.NOUN, translation="dom")]
+        return [Card(language="nb", word="hus", pos=POS.NOUN, translation="dom")]
 
     async def fake_pipeline(cards: list[Card], db: Any, cfg: Any) -> dict:
         return await _stats(cards)
@@ -207,7 +207,7 @@ def test_generate_first_card_note_type_missing_falls_back(
     async def fake_ingest(
         topic: str, count: int, level: str, exclude_words: list[str]
     ) -> list[Card]:
-        return [Card(word="hus", pos=POS.NOUN, translation="dom")]
+        return [Card(language="nb", word="hus", pos=POS.NOUN, translation="dom")]
 
     async def fake_pipeline(cards: list[Card], db: Any, cfg: Any) -> dict:
         return await _stats(cards)

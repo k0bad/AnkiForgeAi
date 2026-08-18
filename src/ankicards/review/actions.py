@@ -17,7 +17,7 @@ from ..pipeline import _record, delete_card_record, enrich_and_generate_media
 EDITABLE_FIELDS = ("word", "translation", "example", "example_translation")
 
 
-def _require_cards(card_ids: list[int], db: Database) -> list[Card]:
+def _require_cards(card_ids: list[int], db: Database, language: str | None = None) -> list[Card]:
     cards: list[Card] = []
     missing: list[int] = []
     for card_id in card_ids:
@@ -28,11 +28,25 @@ def _require_cards(card_ids: list[int], db: Database) -> list[Card]:
             cards.append(card)
     if missing:
         raise ValueError(f"Карточки не найдены: {', '.join(str(m) for m in missing)}")
+
+    # language=... (issue #63): --language на CLI защищает от случайного действия
+    # над карточкой другого языка (устаревший список, опечатка в id, забытый флаг) —
+    # жёсткая ошибка вместо тихого пропуска, по решению пользователя при планировании.
+    if language is not None:
+        mismatched = [c for c in cards if c.language != language]
+        if mismatched:
+            details = ", ".join(f"{c.id} ({c.language})" for c in mismatched)
+            raise ValueError(f"Карточки другого языка (ожидался {language!r}): {details}")
+
     return cards
 
 
 async def accept_cards(
-    card_ids: list[int], db: Database, cfg: Config, auto_pick_images: bool = True
+    card_ids: list[int],
+    db: Database,
+    cfg: Config,
+    auto_pick_images: bool = True,
+    language: str | None = None,
 ) -> dict[int, str]:
     """Принять карточки: enrich + media, затем approved (или review, если
     enrichment оказался неполным). Возвращает {card_id: итоговый статус}.
@@ -40,7 +54,7 @@ async def accept_cards(
     auto_pick_images=False — см. enrich_and_generate_media: используется
     review_pending(), которое само подбирает картинку с человеком после этого вызова.
     """
-    cards = _require_cards(card_ids, db)
+    cards = _require_cards(card_ids, db, language)
     if not cards:
         return {}
 
@@ -57,7 +71,9 @@ async def accept_cards(
     return results
 
 
-async def delete_cards(card_ids: list[int], db: Database, anki: AnkiConnect) -> list[int]:
+async def delete_cards(
+    card_ids: list[int], db: Database, anki: AnkiConnect, language: str | None = None
+) -> list[int]:
     """Удалить карточки насовсем: из Anki (если уже запушены — вместе с их
     историей повторений/интервалов там!), из локальной БД, освободить номер
     для переиспользования следующей новой карточкой.
@@ -65,7 +81,7 @@ async def delete_cards(card_ids: list[int], db: Database, anki: AnkiConnect) -> 
     Anki-вызов идёт первым — если deleteNotes упадёт, локальная запись о
     карточке останется нетронутой, а не будет молча стёрта раньше времени.
     """
-    cards = _require_cards(card_ids, db)
+    cards = _require_cards(card_ids, db, language)
     deleted: list[int] = []
     for card in cards:
         assert card.id is not None
@@ -76,29 +92,37 @@ async def delete_cards(card_ids: list[int], db: Database, anki: AnkiConnect) -> 
     return deleted
 
 
-def _set_status(card_ids: list[int], status: Status, action: str, db: Database) -> list[int]:
-    _require_cards(card_ids, db)
+def _set_status(
+    card_ids: list[int],
+    status: Status,
+    action: str,
+    db: Database,
+    language: str | None = None,
+) -> list[int]:
+    _require_cards(card_ids, db, language)
     for card_id in card_ids:
         db.update_status(card_id, status)
         _record(db, "info", action, card_id)
     return card_ids
 
 
-def skip_cards(card_ids: list[int], db: Database) -> list[int]:
-    return _set_status(card_ids, Status.SKIPPED, "review_skip", db)
+def skip_cards(card_ids: list[int], db: Database, language: str | None = None) -> list[int]:
+    return _set_status(card_ids, Status.SKIPPED, "review_skip", db, language)
 
 
-def suspend_cards(card_ids: list[int], db: Database) -> list[int]:
-    return _set_status(card_ids, Status.SUSPENDED, "review_suspend", db)
+def suspend_cards(card_ids: list[int], db: Database, language: str | None = None) -> list[int]:
+    return _set_status(card_ids, Status.SUSPENDED, "review_suspend", db, language)
 
 
-def resume_cards(card_ids: list[int], db: Database) -> list[int]:
+def resume_cards(card_ids: list[int], db: Database, language: str | None = None) -> list[int]:
     """Вернуть suspended/skipped карточки в review (передумали)."""
-    return _set_status(card_ids, Status.REVIEW, "review_resume", db)
+    return _set_status(card_ids, Status.REVIEW, "review_resume", db, language)
 
 
-def edit_card(card_id: int, updates: dict[str, str], db: Database) -> Card:
-    _require_cards([card_id], db)
+def edit_card(
+    card_id: int, updates: dict[str, str], db: Database, language: str | None = None
+) -> Card:
+    _require_cards([card_id], db, language)
     bad_fields = [k for k in updates if k not in EDITABLE_FIELDS]
     if bad_fields:
         raise ValueError(

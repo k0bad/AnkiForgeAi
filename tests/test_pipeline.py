@@ -49,7 +49,7 @@ def _make_config(tmp_path: Path, **enrich_overrides: bool) -> Config:
 
 
 def _card(word: str, translation: str = "перевод") -> Card:
-    return Card(word=word, pos=POS.NOUN, translation=translation)
+    return Card(language="nb", word=word, pos=POS.NOUN, translation=translation)
 
 
 @pytest.fixture
@@ -303,7 +303,7 @@ async def test_non_noun_with_existing_translation_skips_translation_stage(
 
     cfg = _make_config(tmp_path, grammar=False, examples=False, pronunciation=False)
     cfg.images.enabled = True
-    card = Card(word="spise", pos=POS.VERB, translation="есть")
+    card = Card(language="nb", word="spise", pos=POS.VERB, translation="есть")
 
     await pipeline.run_ingest_pipeline([card], db=db, cfg=cfg, auto_enrich=True, auto_media=False)
 

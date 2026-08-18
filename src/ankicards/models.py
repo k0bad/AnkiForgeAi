@@ -75,6 +75,7 @@ class Card(BaseModel):
     """Словарная карточка. Соответствует одной заметке в Anki."""
 
     id: int | None = None  # выделяется Database.insert_card() — наименьший свободный номер
+    language: str  # код языкового профиля на момент создания (languages/{code}/) — issue #63
     word: str  # основная форма (lemma)
     pronunciation: str | None = None  # практическая транскрипция или IPA — см. config.transcription
     translation: str  # 1-2 варианта

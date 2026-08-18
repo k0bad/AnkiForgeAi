@@ -23,7 +23,7 @@ def db(tmp_path: Path) -> Database:
 
 
 def _card(word: str) -> Card:
-    return Card(word=word, pos=POS.NOUN, translation="перевод")
+    return Card(language="nb", word=word, pos=POS.NOUN, translation="перевод")
 
 
 def test_first_card_gets_id_1(db: Database) -> None:

@@ -16,7 +16,7 @@ from datetime import date, timedelta
 from .anki.connect import AnkiConnect, AnkiConnectError
 from .anki.notetype import _get_note_type_name as get_note_type_name
 from .anki.notetype import card_to_anki_fields
-from .config import Config
+from .config import Config, resolve_anki_profile
 from .db import Database
 from .dedupe import check_card, judge_review
 from .enrich.examples import enrich_example_batch
@@ -363,8 +363,8 @@ async def run_ingest_pipeline(
 
 
 async def push_approved(db: Database, anki: AnkiConnect, cfg: Config) -> int:
-    """Отправить все approved карточки в Anki. Вернуть количество."""
-    approved = db.get_by_status(Status.APPROVED)
+    """Отправить все approved карточки активного языка в Anki. Вернуть количество."""
+    approved = db.get_by_status(Status.APPROVED, cfg.language)
     if not approved:
         return 0
 
@@ -415,8 +415,9 @@ async def check_level_progress(db: Database, anki: AnkiConnect, cfg: Config) -> 
     CLAUDE.md принцип 1)."""
     ic = cfg.ingest
     order = list(Level)
-    totals = db.count_by_level()
+    totals = db.count_by_level(cfg.language)
     hints = []
+    deck = resolve_anki_profile(cfg).deck_name
     for level in order[:-1]:  # C2 — расти уже некуда
         min_cards = ic.level_progress_min_cards.get(level.value)
         if min_cards is None:
@@ -424,7 +425,7 @@ async def check_level_progress(db: Database, anki: AnkiConnect, cfg: Config) -> 
         pushed = totals.get(level.value, {}).get(Status.PUSHED.value, 0)
         if pushed < min_cards:
             continue
-        card_ids = await anki.find_cards(f'deck:"{cfg.anki.deck_name}" tag:level::{level.value}')
+        card_ids = await anki.find_cards(f'deck:"{deck}" tag:level::{level.value}')
         if len(card_ids) < min_cards:
             continue
         infos = await anki.cards_info(card_ids)

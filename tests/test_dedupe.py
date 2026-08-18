@@ -67,7 +67,7 @@ def cfg(tmp_path: Path) -> Config:
 
 
 def _card(word: str, pos: POS = POS.NOUN, translation: str = "перевод") -> Card:
-    return Card(word=word, pos=pos, translation=translation)
+    return Card(language="nb", word=word, pos=pos, translation=translation)
 
 
 def test_exact_match_case_insensitive() -> None:
@@ -120,6 +120,19 @@ def test_low_similarity_returns_new(db: Database, cfg: Config) -> None:
 def test_empty_db_returns_new(db: Database, cfg: Config) -> None:
     decision = check_card(_card("bil"), db, cfg)
     assert decision.decision == "new"
+
+
+def test_cross_language_exact_word_match_does_not_dedupe(db: Database, cfg: Config) -> None:
+    """Issue #63: одинаковое написание в двух разных языках — не дубликат.
+    check_card должен сравнивать только карточки card.language, а не всю staging."""
+    existing = Card(language="de", word="hus", pos=POS.NOUN, translation="дом (нем., гипотетика)")
+    db.insert_card(existing)
+
+    candidate = Card(language="nb", word="hus", pos=POS.NOUN, translation="дом")
+    decision = check_card(candidate, db, cfg)
+
+    assert decision.decision == "new"
+    assert decision.matches == []
 
 
 def test_fuzzy_matches_respects_threshold() -> None:

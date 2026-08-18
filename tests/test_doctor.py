@@ -69,7 +69,15 @@ def _card(
     **overrides: object,
 ) -> Card:
     # image заполнен по умолчанию, чтобы не задевать images-проверку в тестах других check'ов
-    card = Card(word=word, pos=pos, translation="дом", status=status, image=image, **overrides)
+    card = Card(
+        language="nb",
+        word=word,
+        pos=pos,
+        translation="дом",
+        status=status,
+        image=image,
+        **overrides,
+    )
     db.insert_card(card)  # find_inconsistencies работает с уже сохранёнными карточками (id: int)
     return card
 

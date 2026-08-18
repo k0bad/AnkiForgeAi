@@ -309,14 +309,67 @@ class Secrets(BaseSettings):
 
 
 @lru_cache(maxsize=1)
-def get_config(path: Path | None = None) -> Config:
-    """Загрузить и закэшировать конфигурацию."""
+def _cached_config(path: Path | None = None) -> Config:
+    """Загрузить и закэшировать конфигурацию из файла."""
     cfg_path = path or DEFAULT_CONFIG_PATH
     with cfg_path.open(encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     cfg = Config.model_validate(raw)
     cfg.resolve_paths()
     return cfg
+
+
+# Активный override (issue #63: --language на CLI-командах) — единственное
+# "текущее" значение на процесс, не конкурентный кэш на несколько языков сразу
+# (это осознанно за рамками фичи, см. CLAUDE.md/issue #63). Нужен, потому что
+# get_config() дёргается напрямую (без параметра cfg) из load_prompt() (llm.py)
+# и notetype._current_language() — передать туда переопределённый Config как
+# аргумент некуда, поэтому переопределяем то, что вернёт сам get_config().
+_config_override: Config | None = None
+
+
+def set_config_override(cfg: Config) -> None:
+    """Подменить get_config() на `cfg` до конца процесса (или clear_config_override())."""
+    global _config_override
+    _config_override = cfg
+
+
+def clear_config_override() -> None:
+    """Сбросить override — используется в тестах между кейсами."""
+    global _config_override
+    _config_override = None
+
+
+def get_config(path: Path | None = None) -> Config:
+    """Загрузить конфигурацию (с кэшем) либо вернуть активный override."""
+    if _config_override is not None:
+        return _config_override
+    return _cached_config(path)
+
+
+def with_language(cfg: Config, language: str) -> Config:
+    """Копия `cfg` с другим language: — валидирует, что languages/{language}/
+    существует (переиспользует ошибку get_language()), не трогает кэш get_config()."""
+    get_language(language)
+    return cfg.model_copy(update={"language": language})
+
+
+def resolve_anki_profile(cfg: Config) -> AnkiConfig:
+    """Deck/note_type для активного языка: сначала languages/{code}/language.yaml
+    (anki.deck_name/note_type), пусто в профиле — fallback на глобальный cfg.anki
+    (см. AnkiProfileConfig.deck_name — пустая строка по умолчанию значит "не задано").
+
+    Нужен, потому что cfg.anki.* — статическая копия, которую setup_wizard пишет в
+    config.yaml один раз для языка, активного на момент setup (issue #63): без этой
+    функции AnkiConnect/sync/check_level_progress продолжали бы читать deck/note_type
+    языка, который был активен при setup, а не текущего cfg.language.
+    """
+    profile = get_language(cfg.language).anki
+    return AnkiConfig(
+        url=cfg.anki.url,
+        deck_name=profile.deck_name or cfg.anki.deck_name,
+        note_type=profile.note_type or cfg.anki.note_type,
+    )
 
 
 @lru_cache(maxsize=1)

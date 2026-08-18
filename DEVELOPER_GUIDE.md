@@ -539,7 +539,7 @@ curl -X POST http://<n8n-host>:5678/webhook/ankicards-notify -H 'Content-Type: a
 
 - [x] Добавить `language: nb` в `config.yaml` (сейчас — дефолт `get_language()`)
 - [x] Языковые профили `de`/`en`/`es` в дополнение к `nb` (все четыре — полные, `languages/{code}/`)
-- [ ] `ankiforgeai config set language.de` (CLI-команда для смены языка без ручного редактирования `config.yaml`)
+- [x] Флаг `--language`/`-l` на командах, работающих с данными, — смена языка на один запуск без правки `config.yaml` (issue #63); карточки, dedupe, review и push/sync в Anki изолированы по языку, так что `nb` и `de` могут сосуществовать в одной локальной БД. Одновременный запуск нескольких языков в одной команде (`ingest topic ... --languages nb,de`) — осознанно не сделано, отдельная задача
 - [x] AI-адъюдикация дедупа (`dedupe.ai_adjudication`, `dedupe.judge_review`) — LLM решает SAME/DIFFERENT
       для нечётких совпадений вместо автоматического ухода в ревью
 - [x] Pluggable-каналы уведомлений (`notify/`, generic webhook: n8n/Zapier/Hermes/…)

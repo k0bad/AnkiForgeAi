@@ -326,7 +326,7 @@ async def test_attach_image_uses_image_query_when_present(
 ) -> None:
     captured = await _fake_search(monkeypatch)
     cfg = _make_config()
-    card = Card(word="hus", pos=POS.NOUN, translation="дом", image_query="house")
+    card = Card(language="nb", word="hus", pos=POS.NOUN, translation="дом", image_query="house")
 
     await images_module.attach_image(card, cfg, auto_pick=True)
 
@@ -338,7 +338,7 @@ async def test_attach_image_falls_back_to_word_without_image_query(
 ) -> None:
     captured = await _fake_search(monkeypatch)
     cfg = _make_config()
-    card = Card(word="hus", pos=POS.NOUN, translation="дом")
+    card = Card(language="nb", word="hus", pos=POS.NOUN, translation="дом")
 
     await images_module.attach_image(card, cfg, auto_pick=True)
 
@@ -359,7 +359,7 @@ async def test_find_candidates_returns_search_results_without_downloading(
 
     monkeypatch.setattr(images_module, "search_images", fake_search)
     cfg = _make_config()
-    card = Card(word="hus", pos=POS.NOUN, translation="дом", image_query="house")
+    card = Card(language="nb", word="hus", pos=POS.NOUN, translation="дом", image_query="house")
 
     candidates = await images_module.find_candidates(card, cfg)
 
@@ -378,7 +378,7 @@ async def test_find_candidates_skips_search_when_images_disabled(
 
     monkeypatch.setattr(images_module, "search_images", fake_search)
     cfg = _make_config(enabled=False)
-    card = Card(word="hus", pos=POS.NOUN, translation="дом")
+    card = Card(language="nb", word="hus", pos=POS.NOUN, translation="дом")
 
     candidates = await images_module.find_candidates(card, cfg)
 
@@ -398,7 +398,7 @@ async def test_find_candidates_skips_search_for_non_matching_pos(
 
     monkeypatch.setattr(images_module, "search_images", fake_search)
     cfg = _make_config()  # only_for_pos по умолчанию [noun]
-    card = Card(word="snakke", pos=POS.VERB, translation="говорить")
+    card = Card(language="nb", word="snakke", pos=POS.VERB, translation="говорить")
 
     candidates = await images_module.find_candidates(card, cfg)
 
@@ -417,7 +417,7 @@ async def test_save_image_downloads_chosen_result_and_sets_filename(
 
     monkeypatch.setattr(images_module, "download_image", fake_download)
     cfg = _make_config()
-    card = Card(id=7, word="hus", pos=POS.NOUN, translation="дом")
+    card = Card(id=7, language="nb", word="hus", pos=POS.NOUN, translation="дом")
 
     result = {"url": "https://img/2.jpg", "author": "Bob"}
     updated = await images_module.save_image(card, result, cfg)
