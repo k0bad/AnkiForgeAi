@@ -6,11 +6,12 @@
 - pixabay   — https://pixabay.com/api/docs/, 100 запросов/60с, нужен ключ
 - openverse — https://api.openverse.org/v1/#tag/images, ключ не нужен (CC-агрегатор)
 
-Если cfg.images.fallback_providers не пуст, при пустом результате/ошибке текущего
-провайдера (нет ключа, 403/429/5xx) поиск переходит к следующему провайдеру из
-списка по очереди; финальная неудача не считается ошибкой — карточка остаётся
-без картинки, как и при единственном провайдере. Пустой fallback_providers
-(значение по умолчанию) поведение не меняет: ошибка/пустой результат
+Если cfg.images.fallback_providers не пуст (по умолчанию: pexels, pixabay,
+openverse — issue #73), при пустом результате/ошибке текущего провайдера (нет
+ключа, 403/429/5xx) поиск переходит к следующему провайдеру из списка по
+очереди; финальная неудача не считается ошибкой — карточка остаётся без
+картинки, как и при единственном провайдере. Пустой fallback_providers
+(например, явно заданный `[]`) поведение не меняет: ошибка/пустой результат
 единственного провайдера ведут себя как раньше.
 
 Скачивает только для существительных (cfg.images.only_for_pos).
@@ -165,7 +166,10 @@ async def search_images(query: str, cfg: Config, count: int = 5) -> list[dict[st
     отсутствующий ключ, 403/429/5xx) или пустой результат переходят к следующему;
     если не дал никто — возвращается пустой список, а не исключение.
     """
-    provider_names = [cfg.images.provider, *cfg.images.fallback_providers]
+    # dict.fromkeys дедуплицирует с сохранением порядка: если provider повторно
+    # указан в fallback_providers (например, пользователь сконфигурировал
+    # provider: pexels при дефолтном fallback_providers), не запрашиваем его дважды.
+    provider_names = list(dict.fromkeys([cfg.images.provider, *cfg.images.fallback_providers]))
     chain: list[tuple[str, Callable[[str, Config, int], Awaitable[list[dict[str, str]]]]]] = []
     for name in provider_names:
         search = _PROVIDERS.get(name)

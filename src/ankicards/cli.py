@@ -45,7 +45,12 @@ from .anki.notetype import _get_note_type_name as get_note_type_name
 from .anki.sync import sync_anki_to_cache
 from .config import Config, get_config
 from .db import Database, IdMigrationRequiredError
-from .doctor import count_images_skipped_not_noun, find_inconsistencies
+from .doctor import (
+    count_images_failed_no_result,
+    count_images_found,
+    count_images_skipped_not_noun,
+    find_inconsistencies,
+)
 from .ingest.topic import ingest_by_topic
 from .ingest.url import ingest_from_url
 from .log import bound_run, get_logger
@@ -552,8 +557,27 @@ def doctor(
     cards = db.get_by_status(Status.APPROVED) + db.get_by_status(Status.PUSHED)
     problems = find_inconsistencies(cards, cfg)
 
+    # Сводка по картинкам (issue #73) — справочные числа, не Inconsistency и не
+    # влияют на exit code: failed_no_result дублирует check="images.enabled" из
+    # problems выше как готовый счётчик, found/skipped_not_noun (issue #54) дают
+    # полную картину, а не только то, что не нашлось.
+    images_summary = {
+        "found": count_images_found(cards, cfg),
+        "skipped_not_noun": count_images_skipped_not_noun(cards, cfg),
+        "failed_no_result": count_images_failed_no_result(cards, cfg),
+    }
+
     if as_json:
-        print(json.dumps([p.model_dump() for p in problems], ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {
+                    "problems": [p.model_dump() for p in problems],
+                    "images": images_summary,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     else:
         if not problems:
             console.print("[green]✓[/] Несоответствий не найдено")
@@ -567,14 +591,11 @@ def doctor(
                 table.add_row(str(p.card_id), p.word, p.check, p.reason)
             console.print(table)
 
-        # Справочная строка (issue #54) — не Inconsistency и не влияет на exit
-        # code: поясняет часть карточек без image, которые find_inconsistencies
-        # намеренно не флагует (pos вне images.only_for_pos — не баг).
-        skipped_not_noun = count_images_skipped_not_noun(cards, cfg)
-        if skipped_not_noun:
+        if cfg.images.enabled:
             console.print(
-                f"[dim]ℹ Без картинки, но это норма (не существительное): "
-                f"{skipped_not_noun}[/]"
+                f"[dim]ℹ Картинки — найдено: {images_summary['found']}, "
+                f"не найдено: {images_summary['failed_no_result']}, "
+                f"не существительное: {images_summary['skipped_not_noun']}[/]"
             )
 
     if problems:
