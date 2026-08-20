@@ -86,7 +86,9 @@ async def test_unknown_provider_raises() -> None:
 
 async def test_unsplash_missing_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_secrets(monkeypatch)  # все ключи пустые
-    cfg = _make_config(provider="unsplash")
+    # fallback_providers=[] явно: тест проверяет поведение единственного провайдера,
+    # без дефолтного fallback-цепочки (issue #73), который бы просто её проглотил.
+    cfg = _make_config(provider="unsplash", fallback_providers=[])
     with pytest.raises(RuntimeError, match="UNSPLASH_ACCESS_KEY"):
         await images_module.search_images("hus", cfg)
 

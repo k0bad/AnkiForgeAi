@@ -35,7 +35,7 @@ async def enrich_example_batch(cards: list[Card], level: str = "A2") -> list[Car
         level=ref_level,
         words_json=json.dumps(payload, ensure_ascii=False),
     )
-    raw = await call_json(prompt)
+    raw = await call_json(prompt, stage="enrich")
     if not isinstance(raw, list):
         raise ValueError(f"LLM вернул не массив: {type(raw).__name__}")
 

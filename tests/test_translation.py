@@ -18,7 +18,7 @@ async def test_structured_response_fills_translation_and_image_query(
 ) -> None:
     monkeypatch.setattr(translation_module, "load_prompt", lambda name, **kw: "prompt")
 
-    async def _fake_call_text(prompt: str) -> str:
+    async def _fake_call_text(prompt: str, **kwargs) -> str:
         return "RU: дом / хата\nEN: house"
 
     monkeypatch.setattr(translation_module, "call_text", _fake_call_text)
@@ -37,7 +37,7 @@ async def test_multi_word_disambiguated_phrase_parses_into_image_query(
     до первого слова."""
     monkeypatch.setattr(translation_module, "load_prompt", lambda name, **kw: "prompt")
 
-    async def _fake_call_text(prompt: str) -> str:
+    async def _fake_call_text(prompt: str, **kwargs) -> str:
         return "RU: пружина\nEN: metal coil spring"
 
     monkeypatch.setattr(translation_module, "call_text", _fake_call_text)
@@ -55,7 +55,7 @@ async def test_unstructured_response_falls_back_to_plain_translation(
     image_query остаётся пустым (совместимо со старым однострочным промптом)."""
     monkeypatch.setattr(translation_module, "load_prompt", lambda name, **kw: "prompt")
 
-    async def _fake_call_text(prompt: str) -> str:
+    async def _fake_call_text(prompt: str, **kwargs) -> str:
         return '"дом / хата"'
 
     monkeypatch.setattr(translation_module, "call_text", _fake_call_text)
@@ -75,7 +75,7 @@ async def test_multi_sense_en_line_takes_first_variant_and_logs_warning(
     только первый вариант и логируем деградацию, а не отправляем как есть."""
     monkeypatch.setattr(translation_module, "load_prompt", lambda name, **kw: "prompt")
 
-    async def _fake_call_text(prompt: str) -> str:
+    async def _fake_call_text(prompt: str, **kwargs) -> str:
         return "RU: клён / зарплата\nEN: maple tree leaves / salary paycheck money"
 
     monkeypatch.setattr(translation_module, "call_text", _fake_call_text)
@@ -99,7 +99,7 @@ async def test_single_sense_en_line_with_no_slash_is_untouched(
     или обрезаться — только явный " / " внутри EN: считается деградацией."""
     monkeypatch.setattr(translation_module, "load_prompt", lambda name, **kw: "prompt")
 
-    async def _fake_call_text(prompt: str) -> str:
+    async def _fake_call_text(prompt: str, **kwargs) -> str:
         return "RU: пружина\nEN: metal coil spring"
 
     monkeypatch.setattr(translation_module, "call_text", _fake_call_text)
@@ -120,7 +120,7 @@ async def test_existing_translation_still_backfills_image_query(
     уже готовый translation, даже если LLM в этом вызове вернул другой RU:."""
     monkeypatch.setattr(translation_module, "load_prompt", lambda name, **kw: "prompt")
 
-    async def _fake_call_text(prompt: str) -> str:
+    async def _fake_call_text(prompt: str, **kwargs) -> str:
         return "RU: другой перевод\nEN: house"
 
     monkeypatch.setattr(translation_module, "call_text", _fake_call_text)

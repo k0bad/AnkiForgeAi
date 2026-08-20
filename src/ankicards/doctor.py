@@ -111,3 +111,38 @@ def count_images_skipped_not_noun(cards: list[Card], cfg: Config) -> int:
         and card.pos.value not in cfg.images.only_for_pos
         and not card.image
     )
+
+
+def count_images_found(cards: list[Card], cfg: Config) -> int:
+    """Карточки нужного pos (images.only_for_pos) с уже скачанной картинкой (issue #73).
+
+    Справочное число для вывода doctor — сколько картинок реально нашлось,
+    а не только сколько не нашлось (count_images_skipped_not_noun / check="images.enabled").
+    """
+    if not cfg.images.enabled:
+        return 0
+    return sum(
+        1
+        for card in cards
+        if card.status in _CHECKED_STATUSES
+        and card.pos.value in cfg.images.only_for_pos
+        and card.image
+    )
+
+
+def count_images_failed_no_result(cards: list[Card], cfg: Config) -> int:
+    """Карточки нужного pos, для которых провайдер картинку не нашёл (issue #73).
+
+    То же множество карточек, что даёт check="images.enabled" в find_inconsistencies —
+    отдельная функция просто даёт это число без похода за полным списком Inconsistency,
+    для сводки в CLI-команде doctor.
+    """
+    if not cfg.images.enabled:
+        return 0
+    return sum(
+        1
+        for card in cards
+        if card.status in _CHECKED_STATUSES
+        and card.pos.value in cfg.images.only_for_pos
+        and not card.image
+    )

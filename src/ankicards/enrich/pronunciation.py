@@ -35,7 +35,7 @@ async def enrich_pronunciation_batch(cards: list[Card]) -> list[Card]:
         prompt_name,
         words_json=json.dumps(payload, ensure_ascii=False),
     )
-    raw = await call_json(prompt)
+    raw = await call_json(prompt, stage="enrich")
     if not isinstance(raw, list):
         raise ValueError(f"LLM вернул не массив: {type(raw).__name__}")
 

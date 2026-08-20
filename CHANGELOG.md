@@ -4,6 +4,20 @@ All notable changes to AnkiForgeAI will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- `images.fallback_providers` now defaults to `[pexels, pixabay, openverse]` instead of
+  `[]` — a noun with no results from `images.provider` (Unsplash's catalog is missing
+  many common everyday nouns) now cascades through the other providers before giving up,
+  instead of silently staying imageless. `search_images()` also dedupes the provider
+  chain so a provider listed both as `images.provider` and in `fallback_providers` isn't
+  queried twice. Set `fallback_providers: []` to restore the old single-provider
+  behavior. Closes #73 (part 1).
+- `ankiforgeai doctor` now reports an image summary line (`found` / `failed_no_result` /
+  `skipped_not_noun`) alongside the inconsistency table, and `--json` output is now
+  `{"problems": [...], "images": {...}}` instead of a bare list — so `doctor` no longer
+  looks clean just because it found zero *inconsistencies* when many nouns simply never
+  got a picture. Closes #73 (part 2).
+
 ## [0.5.0] — 2026-08-18
 
 ### Added

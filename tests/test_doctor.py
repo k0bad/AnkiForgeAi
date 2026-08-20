@@ -22,7 +22,12 @@ from ankicards.config import (
     TTSConfig,
 )
 from ankicards.db import Database
-from ankicards.doctor import count_images_skipped_not_noun, find_inconsistencies
+from ankicards.doctor import (
+    count_images_failed_no_result,
+    count_images_found,
+    count_images_skipped_not_noun,
+    find_inconsistencies,
+)
 from ankicards.models import POS, Card, Status
 
 _ALL_ENRICH_OFF = EnrichConfig(grammar=False, examples=False, pronunciation=False)
@@ -226,6 +231,56 @@ def test_count_images_skipped_not_noun_excludes_pending_and_review(
     ]
 
     assert count_images_skipped_not_noun(cards, cfg) == 0
+
+
+# ───────────── count_images_found / count_images_failed_no_result (issue #73) ─────────────
+
+
+def test_count_images_found_counts_noun_with_image(tmp_path: Path, db: Database) -> None:
+    images = ImagesConfig(enabled=True, only_for_pos=["noun"])
+    cfg = _make_config(tmp_path, enrich=_ALL_ENRICH_OFF, images=images)
+    _card(db, pos=POS.NOUN, image="hus.jpg")
+    _card(db, word="å smake", pos=POS.VERB, image=None)  # не тот pos — не считается
+
+    cards = db.get_by_status(Status.APPROVED)
+
+    assert count_images_found(cards, cfg) == 1
+
+
+def test_count_images_found_zero_when_images_disabled(tmp_path: Path, db: Database) -> None:
+    images = ImagesConfig(enabled=False, only_for_pos=["noun"])
+    cfg = _make_config(tmp_path, enrich=_ALL_ENRICH_OFF, images=images)
+    _card(db, pos=POS.NOUN, image="hus.jpg")
+
+    cards = db.get_by_status(Status.APPROVED)
+
+    assert count_images_found(cards, cfg) == 0
+
+
+def test_count_images_failed_no_result_counts_noun_without_image(
+    tmp_path: Path, db: Database
+) -> None:
+    images = ImagesConfig(enabled=True, only_for_pos=["noun"])
+    cfg = _make_config(tmp_path, enrich=_ALL_ENRICH_OFF, images=images)
+    _card(db, pos=POS.NOUN, image=None)
+    _card(db, word="hus2", pos=POS.NOUN, image="hus2.jpg")  # есть картинка — не считается
+    _card(db, word="å smake", pos=POS.VERB, image=None)  # не тот pos — не считается
+
+    cards = db.get_by_status(Status.APPROVED)
+
+    assert count_images_failed_no_result(cards, cfg) == 1
+
+
+def test_count_images_failed_no_result_zero_when_images_disabled(
+    tmp_path: Path, db: Database
+) -> None:
+    images = ImagesConfig(enabled=False, only_for_pos=["noun"])
+    cfg = _make_config(tmp_path, enrich=_ALL_ENRICH_OFF, images=images)
+    _card(db, pos=POS.NOUN, image=None)
+
+    cards = db.get_by_status(Status.APPROVED)
+
+    assert count_images_failed_no_result(cards, cfg) == 0
 
 
 def test_pushed_card_missing_anki_note_id_flagged(tmp_path: Path, db: Database) -> None:

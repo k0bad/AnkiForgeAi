@@ -38,7 +38,7 @@ async def enrich_grammar_batch(cards: list[Card]) -> list[Card]:
         "grammar_forms",
         words_json=json.dumps(payload, ensure_ascii=False),
     )
-    raw = await call_json(prompt)
+    raw = await call_json(prompt, stage="enrich")
     if not isinstance(raw, list):
         raise ValueError(f"LLM вернул не массив: {type(raw).__name__}")
 
