@@ -60,7 +60,7 @@ def _make_config(tmp_path: Path, images: dict[str, object] | None = None) -> Con
 
 
 def _card(word: str) -> Card:
-    return Card(word=word, pos=POS.NOUN, translation="перевод")
+    return Card(language="nb", word=word, pos=POS.NOUN, translation="перевод")
 
 
 @pytest.fixture

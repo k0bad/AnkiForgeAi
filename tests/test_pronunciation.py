@@ -14,7 +14,7 @@ class _StubConfig:
 
 
 def _card(word: str = "hus") -> Card:
-    return Card(word=word, pos=POS.NOUN, translation="дом")
+    return Card(language="nb", word=word, pos=POS.NOUN, translation="дом")
 
 
 async def test_practical_transcription_loads_russian_prompt(

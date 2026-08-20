@@ -322,7 +322,7 @@ media/                     # Audio, images (gitignored)
 
 ### Coming up
 
-- [ ] `ankiforgeai config set language.de` — CLI command to switch language without hand-editing `config.yaml`
+- [x] `--language`/`-l` override flag on data-touching commands — switch language per invocation without hand-editing `config.yaml` (issue #63); cards, dedupe, review, and Anki push/sync are all scoped per language, so `nb` and `de` vocab can coexist in the same local DB
 - [ ] `parse_mode: MarkdownV2` support with special-character escaping (`notify/webhook.py` currently renders for legacy `parse_mode: Markdown`)
 - [ ] Nynorsk as its own `language.yaml` (`nn`)
 

@@ -52,13 +52,13 @@ async def ingest_from_url(url: str, level: str = "A2", topic: str | None = None)
         raise ValueError(f"LLM вернул не массив: {type(raw_items).__name__}")
 
     return [
-        _to_card(item, url=url, level=level, topic=topic)
+        _to_card(item, url=url, level=level, topic=topic, language=cfg.language)
         for item in raw_items
         if isinstance(item, dict) and item.get("word") and item.get("translation")
     ]
 
 
-def _to_card(item: dict, url: str, level: str, topic: str | None) -> Card:
+def _to_card(item: dict, url: str, level: str, topic: str | None, language: str) -> Card:
     pos_raw = str(item.get("pos", "other")).lower()
     try:
         pos = POS(pos_raw)
@@ -72,6 +72,7 @@ def _to_card(item: dict, url: str, level: str, topic: str | None) -> Card:
         level_enum = None
 
     return Card(
+        language=language,
         word=str(item["word"]).strip(),
         pos=pos,
         translation=str(item["translation"]).strip(),

@@ -36,7 +36,9 @@ def review_pending(db: Database, cfg: Config) -> None:
     собственный asyncio.run() в finally, поэтому саму функцию нельзя вызывать
     из кода, который уже крутится в event loop'е.
     """
-    cards = db.get_by_status(Status.REVIEW) + db.get_by_status(Status.PENDING)
+    cards = db.get_by_status(Status.REVIEW, cfg.language) + db.get_by_status(
+        Status.PENDING, cfg.language
+    )
     if not cards:
         console.print("[green]Нечего ревьюить.[/]")
         return
@@ -73,13 +75,13 @@ def review_pending(db: Database, cfg: Config) -> None:
                 _record(db, "info", "review_accept", card.id)
                 console.print("[green]✓ approved (enrichment — в конце сессии)[/]")
             elif verb == "skip":
-                actions.skip_cards([card.id], db)
+                actions.skip_cards([card.id], db, language=cfg.language)
                 console.print("[yellow]skipped[/]")
             elif verb == "suspend":
-                actions.suspend_cards([card.id], db)
+                actions.suspend_cards([card.id], db, language=cfg.language)
                 console.print("[yellow]suspended[/]")
             elif verb == "edit":
-                _edit_card(db, card)
+                _edit_card(db, card, language=cfg.language)
     finally:
         if accepted:
             console.print(f"[cyan]Enrich + media для {len(accepted)} карточек...[/]")
@@ -102,7 +104,9 @@ async def _finalize_accepted(cards: list[Card], db: Database, cfg: Config) -> No
         assert card.id is not None  # уже в БД, id всегда назначен
         ids.append(card.id)
 
-    results = await actions.accept_cards(ids, db, cfg, auto_pick_images=False)
+    results = await actions.accept_cards(
+        ids, db, cfg, auto_pick_images=False, language=cfg.language
+    )
     for card in cards:
         assert card.id is not None
         card_id = card.id
@@ -182,7 +186,7 @@ def _show_card(card: Card, decision: Decision | None) -> None:
         console.print(table)
 
 
-def _edit_card(db: Database, card: Card) -> None:
+def _edit_card(db: Database, card: Card, language: str) -> None:
     """Простой редактор ключевых текстовых полей."""
     assert card.id is not None  # уже в БД, id всегда назначен
     updates: dict[str, str] = {}
@@ -198,7 +202,7 @@ def _edit_card(db: Database, card: Card) -> None:
         console.print("[dim]Изменений нет.[/]")
         return
 
-    actions.edit_card(card.id, updates, db)
+    actions.edit_card(card.id, updates, db, language=language)
     console.print("[green]✓ обновлено[/]")
 
 

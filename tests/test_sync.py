@@ -85,8 +85,10 @@ class _FakeAnki:
         ]
 
 
-def _pushed_card(db: Database, word: str, note_id: int) -> Card:
-    card = Card(word=word, pos=POS.NOUN, translation="перевод", status=Status.PUSHED)
+def _pushed_card(db: Database, word: str, note_id: int, language: str = "nb") -> Card:
+    card = Card(
+        language=language, word=word, pos=POS.NOUN, translation="перевод", status=Status.PUSHED
+    )
     db.insert_card(card)
     with db.connect() as conn:
         conn.execute("UPDATE cards SET anki_note_id = ? WHERE id = ?", (note_id, card.id))
@@ -119,7 +121,7 @@ async def test_sync_reuses_id_freed_by_anki_side_deletion(db: Database, cfg: Con
     await sync_anki_to_cache(db, _FakeAnki({}), cfg)  # type: ignore[arg-type]
     assert db.get_by_id(card.id) is None
 
-    new_card = Card(word="bil", pos=POS.NOUN, translation="машина")
+    new_card = Card(language="nb", word="bil", pos=POS.NOUN, translation="машина")
     db.insert_card(new_card)
     assert new_card.id == card.id
 
@@ -147,4 +149,34 @@ async def test_sync_mass_deletion_guard_skips_deletion(db: Database, cfg: Config
     await sync_anki_to_cache(db, _FakeAnki({}), cfg)  # type: ignore[arg-type]
 
     for c in cards:
+        assert db.get_by_id(c.id) is not None
+
+
+async def test_sync_mass_delete_guard_not_diluted_by_other_language(
+    db: Database, cfg: Config, tmp_path: Path
+) -> None:
+    """Issue #63: до фильтра по языку знаменатель guard'а
+    (count_cards_with_anki_note_id) считал запушенные карточки ВСЕХ языков —
+    массовое удаление 3 немецких заметок размывалось количеством запушенных
+    норвежских (3/11 ≈ 27% < 50%) и guard не срабатывал, хотя должен был."""
+    cfg_de = _make_config(tmp_path)
+    cfg_de.language = "de"
+
+    # Шумовые "nb"-карточки — раньше именно они размывали знаменатель guard'а.
+    for i, w in enumerate(("hus", "bil", "katt", "fisk", "bok", "penn", "stol", "bord"), start=1):
+        _pushed_card(db, w, note_id=i, language="nb")
+
+    de_cards = [
+        _pushed_card(db, w, note_id=i, language="de")
+        for i, w in enumerate(("Haus", "Auto", "Katze"), start=100)
+    ]
+    notes = {c.anki_note_id: {"fields": {"Word": c.word}} for c in de_cards}
+    await sync_anki_to_cache(db, _FakeAnki(notes), cfg_de)  # type: ignore[arg-type]
+
+    # Все 3 немецкие заметки пропадают разом — 3 из 3 отслеживаемых "de"-карточек
+    # (100%, выше _MASS_DELETE_GUARD_RATIO), guard должен сработать несмотря на
+    # шумные "nb"-карточки в той же базе.
+    await sync_anki_to_cache(db, _FakeAnki({}), cfg_de)  # type: ignore[arg-type]
+
+    for c in de_cards:
         assert db.get_by_id(c.id) is not None

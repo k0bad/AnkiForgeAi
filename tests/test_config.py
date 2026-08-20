@@ -82,6 +82,52 @@ def test_resolve_paths_keeps_existing_checkout_prompts_dir(
     assert cfg.paths.prompts_dir == checkout_prompts
 
 
+def test_get_config_returns_override_when_set(tmp_path: Path) -> None:
+    """Issue #63: --language на CLI подменяет get_config() на весь процесс через
+    set_config_override — так его видят и код, вызывающий get_config() сам
+    (load_prompt, notetype._current_language), не только явный параметр cfg."""
+    cfg = _make_config(Path("prompts"))
+    try:
+        config_module.set_config_override(cfg)
+        assert config_module.get_config() is cfg
+    finally:
+        config_module.clear_config_override()
+
+
+def test_clear_config_override_falls_back_to_cached_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    override_cfg = _make_config(tmp_path)
+    fallback_cfg = _make_config(tmp_path)
+    monkeypatch.setattr(config_module, "_cached_config", lambda path=None: fallback_cfg)
+
+    try:
+        config_module.set_config_override(override_cfg)
+        assert config_module.get_config() is override_cfg
+
+        config_module.clear_config_override()
+        assert config_module.get_config() is fallback_cfg
+    finally:
+        config_module.clear_config_override()
+
+
+def test_with_language_returns_copy_without_mutating_original(tmp_path: Path) -> None:
+    cfg = _make_config(tmp_path)
+    assert cfg.language == "nb"
+
+    overridden = config_module.with_language(cfg, "de")
+
+    assert overridden.language == "de"
+    assert cfg.language == "nb"  # оригинал не тронут — model_copy, не мутация на месте
+    assert overridden is not cfg
+
+
+def test_with_language_raises_for_unknown_language_code(tmp_path: Path) -> None:
+    cfg = _make_config(tmp_path)
+    with pytest.raises(FileNotFoundError):
+        config_module.with_language(cfg, "xx-not-a-real-language")
+
+
 def test_load_prompt_resolves_bundled_copy_with_no_per_language_prompt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

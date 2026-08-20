@@ -67,6 +67,7 @@ def patch_language(tmp_path, monkeypatch):
 def test_card_to_anki_fields_escapes_html(patch_language) -> None:
     patch_language()
     card = Card(
+        language="nb",
         word="<script>alert(1)</script>",
         pos=POS.NOUN,
         translation="<img src=x onerror=alert(1)>",
@@ -87,7 +88,7 @@ def test_image_audio_pos_forms_are_intentional_html(patch_language) -> None:
     """Image/Audio/POS/Forms — единственные поля, где сырой HTML нужен намеренно
     (img-тег, [sound:], цветной pill, ячейки грида) — значения внутри экранированы."""
     patch_language()
-    card = Card(word="hus", pos=POS.NOUN, translation="дом")
+    card = Card(language="nb", word="hus", pos=POS.NOUN, translation="дом")
     card.image = "abc123.jpg"
     card.audio = "abc123_nb.mp3"
     card.forms = {"indefinite_singular": "hus", "definite_singular": "huset"}
@@ -104,7 +105,7 @@ def test_pos_pill_colors_by_raw_pos_value_not_localized_label(patch_language) ->
     """Кодирование цвета (.pos-noun/.pos-verb/.pos-adj/.pos-adv в CSS) идёт по
     card.pos.value (raw-слаг "verb"), видимый текст — локализованный лейбл ("Verb" для de)."""
     patch_language(language="de")
-    card = Card(word="sprechen", pos=POS.VERB, translation="говорить")
+    card = Card(language="de", word="sprechen", pos=POS.VERB, translation="говорить")
     fields = notetype.card_to_anki_fields(card)
     assert fields["POS"] == '<span class="pos-pill pos-verb">Verb</span>'
 
@@ -216,7 +217,7 @@ def test_custom_field_subset_reflected_in_field_names_and_card_fields(
     )
     assert notetype.field_names() == ["Front", "Back"]
 
-    card = Card(word="hus", pos=POS.NOUN, translation="дом")
+    card = Card(language="nb", word="hus", pos=POS.NOUN, translation="дом")
     fields = notetype.card_to_anki_fields(card)
     assert fields == {"Front": "hus", "Back": "дом"}
 
@@ -224,7 +225,7 @@ def test_custom_field_subset_reflected_in_field_names_and_card_fields(
 def test_unknown_source_raises_note_type_config_error(patch_custom_fields) -> None:
     patch_custom_fields([NoteFieldDef(name="Synonyms", source="synonyms", slot="translation")])
 
-    card = Card(word="hus", pos=POS.NOUN, translation="дом")
+    card = Card(language="nb", word="hus", pos=POS.NOUN, translation="дом")
     with pytest.raises(notetype.NoteTypeConfigError, match="synonyms"):
         notetype.card_to_anki_fields(card)
 

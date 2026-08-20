@@ -43,7 +43,7 @@ from .anki.notetype import (
 )
 from .anki.notetype import _get_note_type_name as get_note_type_name
 from .anki.sync import sync_anki_to_cache
-from .config import Config, get_config
+from .config import Config, get_config, set_config_override, with_language
 from .db import Database, IdMigrationRequiredError
 from .doctor import (
     count_images_failed_no_result,
@@ -92,12 +92,33 @@ app.add_typer(review_app, name="review")
 
 console = Console()
 
+_LANGUAGE_OPT = typer.Option(
+    None, "--language", "-l", help="Переопределить language: из config.yaml на этот запуск"
+)
+
+
+def _cfg(language: str | None) -> Config:
+    """Получить активный Config, при --language подменив cfg.language на этот запуск
+    (issue #63). set_config_override делает подмену видимой и для кода, который зовёт
+    get_config() сам (load_prompt, notetype._current_language) — не только для cfg,
+    переданного явно сюда дальше по стеку."""
+    cfg = get_config()
+    if not language:
+        return cfg
+    try:
+        overridden = with_language(cfg, language)
+    except FileNotFoundError as e:
+        console.print(f"[red]✗[/] {e}")
+        raise typer.Exit(code=1) from e
+    set_config_override(overridden)
+    return overridden
+
 
 def _open_db(cfg: Config) -> Database:
     """Открыть Database, но с понятной ошибкой вместо трейсбека, если БД ещё
     на старой (UUID) схеме id и ждёт `ankiforgeai migrate-ids`."""
     try:
-        return Database(cfg.paths.db)
+        return Database(cfg.paths.db, default_language=cfg.language)
     except IdMigrationRequiredError as e:
         console.print(f"[red]✗[/] {e}")
         raise typer.Exit(code=1) from e
@@ -135,9 +156,9 @@ def setup() -> None:
 
 
 @app.command()
-def init() -> None:
+def init(language: str | None = _LANGUAGE_OPT) -> None:
     """Создать БД и Note Type в Anki."""
-    cfg = get_config()
+    cfg = _cfg(language)
 
     try:
         validate_active_fields()
@@ -160,7 +181,7 @@ def init() -> None:
                 "(с addon AnkiConnect)."
             )
             return
-        console.print(f"[green]✓[/] Deck готов: {cfg.anki.deck_name}")
+        console.print(f"[green]✓[/] Deck готов: {anki.deck}")
 
         note_type = get_note_type_name()
         front, back = front_template(), back_template()
@@ -220,9 +241,10 @@ def ingest_url_cmd(
     level: str = typer.Option("A2", help="CEFR уровень"),
     topic: str | None = typer.Option(None, help="Метка темы для тегов"),
     as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
+    language: str | None = _LANGUAGE_OPT,
 ) -> None:
     """Извлечь слова со страницы по URL."""
-    cfg = get_config()
+    cfg = _cfg(language)
     db = _open_db(cfg)
 
     async def _run() -> dict:
@@ -236,7 +258,7 @@ def ingest_url_cmd(
     with bound_run("ingest_url"):
         stats = asyncio.run(_run())
 
-    level_totals = _level_totals(db)
+    level_totals = _level_totals(db, cfg.language)
     if as_json:
         print(json.dumps({**stats, "level_totals": level_totals}, ensure_ascii=False, indent=2))
     else:
@@ -252,16 +274,17 @@ def ingest_topic_cmd(
     ),
     level: str = typer.Option("A2", help="CEFR уровень"),
     as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
+    language: str | None = _LANGUAGE_OPT,
 ) -> None:
     """Сгенерировать слова по теме через Claude."""
-    cfg = get_config()
+    cfg = _cfg(language)
     db = _open_db(cfg)
     count = count if count is not None else cfg.ingest.default_count
 
     async def _run() -> dict:
         if not as_json:
             console.print(f"[cyan]→[/] Генерирую {count} слов по теме '{topic}' ({level})")
-        exclude = [w for _, w in db.all_words()]
+        exclude = [w for _, w in db.all_words(cfg.language)]
         cards = await ingest_by_topic(topic=topic, count=count, level=level, exclude_words=exclude)
         if not as_json:
             console.print(f"[cyan]→[/] LLM вернул {len(cards)} кандидатов")
@@ -270,7 +293,7 @@ def ingest_topic_cmd(
     with bound_run("ingest_topic"):
         stats = asyncio.run(_run())
 
-    level_totals = _level_totals(db)
+    level_totals = _level_totals(db, cfg.language)
     if as_json:
         print(json.dumps({**stats, "level_totals": level_totals}, ensure_ascii=False, indent=2))
     else:
@@ -279,11 +302,11 @@ def ingest_topic_cmd(
 
 
 @review_app.callback(invoke_without_command=True)
-def review(ctx: typer.Context) -> None:
+def review(ctx: typer.Context, language: str | None = _LANGUAGE_OPT) -> None:
     """Без подкоманды — интерактивный ревью pending-карточек (нужен TTY)."""
     if ctx.invoked_subcommand is not None:
         return
-    cfg = get_config()
+    cfg = _cfg(language)
     db = _open_db(cfg)
     with bound_run("review"):
         review_pending(db, cfg)
@@ -292,11 +315,14 @@ def review(ctx: typer.Context) -> None:
 @review_app.command("list")
 def review_list_cmd(
     as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
+    language: str | None = _LANGUAGE_OPT,
 ) -> None:
     """Список карточек на ревью (review + pending) — без TTY."""
-    cfg = get_config()
+    cfg = _cfg(language)
     db = _open_db(cfg)
-    cards = db.get_by_status(Status.REVIEW) + db.get_by_status(Status.PENDING)
+    cards = db.get_by_status(Status.REVIEW, cfg.language) + db.get_by_status(
+        Status.PENDING, cfg.language
+    )
 
     if as_json:
         print(json.dumps([c.model_dump(mode="json") for c in cards], ensure_ascii=False, indent=2))
@@ -328,14 +354,17 @@ _FIELD_OPT = typer.Option(..., "--field", "-f", help=_FIELD_HELP)
 def review_accept_cmd(
     card_ids: list[int] = _CARD_IDS_ARG,
     as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
+    language: str | None = _LANGUAGE_OPT,
 ) -> None:
     """Принять карточки без TTY: enrich + media, затем approved."""
-    cfg = get_config()
+    cfg = _cfg(language)
     db = _open_db(cfg)
 
     with bound_run("review_accept"):
         try:
-            results = asyncio.run(review_actions.accept_cards(card_ids, db, cfg))
+            results = asyncio.run(
+                review_actions.accept_cards(card_ids, db, cfg, language=cfg.language)
+            )
         except ValueError as e:
             console.print(f"[red]✗[/] {e}")
             raise typer.Exit(code=1) from e
@@ -349,13 +378,15 @@ def review_accept_cmd(
 
 
 @review_app.command("skip")
-def review_skip_cmd(card_ids: list[int] = _CARD_IDS_ARG) -> None:
+def review_skip_cmd(
+    card_ids: list[int] = _CARD_IDS_ARG, language: str | None = _LANGUAGE_OPT
+) -> None:
     """Пометить карточки как skipped без TTY."""
-    cfg = get_config()
+    cfg = _cfg(language)
     db = _open_db(cfg)
     with bound_run("review_skip"):
         try:
-            review_actions.skip_cards(card_ids, db)
+            review_actions.skip_cards(card_ids, db, language=cfg.language)
         except ValueError as e:
             console.print(f"[red]✗[/] {e}")
             raise typer.Exit(code=1) from e
@@ -364,13 +395,15 @@ def review_skip_cmd(card_ids: list[int] = _CARD_IDS_ARG) -> None:
 
 
 @review_app.command("suspend")
-def review_suspend_cmd(card_ids: list[int] = _CARD_IDS_ARG) -> None:
+def review_suspend_cmd(
+    card_ids: list[int] = _CARD_IDS_ARG, language: str | None = _LANGUAGE_OPT
+) -> None:
     """Пометить карточки как suspended без TTY."""
-    cfg = get_config()
+    cfg = _cfg(language)
     db = _open_db(cfg)
     with bound_run("review_suspend"):
         try:
-            review_actions.suspend_cards(card_ids, db)
+            review_actions.suspend_cards(card_ids, db, language=cfg.language)
         except ValueError as e:
             console.print(f"[red]✗[/] {e}")
             raise typer.Exit(code=1) from e
@@ -379,13 +412,15 @@ def review_suspend_cmd(card_ids: list[int] = _CARD_IDS_ARG) -> None:
 
 
 @review_app.command("resume")
-def review_resume_cmd(card_ids: list[int] = _CARD_IDS_ARG) -> None:
+def review_resume_cmd(
+    card_ids: list[int] = _CARD_IDS_ARG, language: str | None = _LANGUAGE_OPT
+) -> None:
     """Вернуть suspended/skipped карточки обратно в review без TTY."""
-    cfg = get_config()
+    cfg = _cfg(language)
     db = _open_db(cfg)
     with bound_run("review_resume"):
         try:
-            review_actions.resume_cards(card_ids, db)
+            review_actions.resume_cards(card_ids, db, language=cfg.language)
         except ValueError as e:
             console.print(f"[red]✗[/] {e}")
             raise typer.Exit(code=1) from e
@@ -397,6 +432,7 @@ def review_resume_cmd(card_ids: list[int] = _CARD_IDS_ARG) -> None:
 def review_edit_cmd(
     card_id: int,
     field: list[str] = _FIELD_OPT,
+    language: str | None = _LANGUAGE_OPT,
 ) -> None:
     """Отредактировать текстовые поля карточки без TTY."""
     updates: dict[str, str] = {}
@@ -407,11 +443,11 @@ def review_edit_cmd(
         key, value = item.split("=", 1)
         updates[key] = value
 
-    cfg = get_config()
+    cfg = _cfg(language)
     db = _open_db(cfg)
     with bound_run("review_edit"):
         try:
-            updated = review_actions.edit_card(card_id, updates, db)
+            updated = review_actions.edit_card(card_id, updates, db, language=cfg.language)
         except ValueError as e:
             console.print(f"[red]✗[/] {e}")
             raise typer.Exit(code=1) from e
@@ -419,9 +455,12 @@ def review_edit_cmd(
 
 
 @app.command()
-def push(as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод")) -> None:
+def push(
+    as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
+    language: str | None = _LANGUAGE_OPT,
+) -> None:
     """Отправить approved-карточки в Anki."""
-    cfg = get_config()
+    cfg = _cfg(language)
     db = _open_db(cfg)
     anki = AnkiConnect(cfg)
 
@@ -451,9 +490,12 @@ def push(as_json: bool = typer.Option(False, "--json", help="Машиночит�
 
 
 @app.command()
-def sync(as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод")) -> None:
+def sync(
+    as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
+    language: str | None = _LANGUAGE_OPT,
+) -> None:
     """Обновить локальный кэш из Anki."""
-    cfg = get_config()
+    cfg = _cfg(language)
     db = _open_db(cfg)
     anki = AnkiConnect(cfg)
 
@@ -477,13 +519,14 @@ def sync(as_json: bool = typer.Option(False, "--json", help="Машиночит�
 def delete(
     card_ids: list[int] = _CARD_IDS_ARG,
     as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
+    language: str | None = _LANGUAGE_OPT,
 ) -> None:
     """Удалить карточки насовсем и освободить их номер для новых карточек.
 
     Если карточка уже запушена в Anki, вместе с заметкой стирается и её
     история повторений/интервалов там — это необратимо.
     """
-    cfg = get_config()
+    cfg = _cfg(language)
     db = _open_db(cfg)
     anki = AnkiConnect(cfg)
 
@@ -494,7 +537,7 @@ def delete(
         )
 
     async def _run() -> list[int]:
-        return await review_actions.delete_cards(card_ids, db, anki)
+        return await review_actions.delete_cards(card_ids, db, anki, language=cfg.language)
 
     with bound_run("delete"):
         try:
@@ -511,13 +554,24 @@ def delete(
 
 
 @app.command()
-def stats(as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод")) -> None:
-    """Статистика по статусам, стрик и общее число слов."""
-    cfg = get_config()
+def stats(
+    as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
+    language: str | None = typer.Option(
+        None, "--language", "-l", help="Показать только этот язык (по умолчанию — все вместе)"
+    ),
+) -> None:
+    """Статистика по статусам, стрик и общее число слов.
+
+    Без --language — сводный вид по всем языкам сразу; с ним — только этот язык.
+    """
+    cfg = _cfg(language)
     db = _open_db(cfg)
 
-    counts = {status.value: len(db.get_by_status(status)) for status in Status}
-    anki_cached = len(db.all_anki_words())
+    # language, не cfg.language: последний после _cfg() всегда конкретен (см. её
+    # docstring), а тут именно "сырой" флаг нужен, чтобы отсутствие --language
+    # значило "все языки", а не "активный язык" (issue #63).
+    counts = {status.value: len(db.get_by_status(status, language)) for status in Status}
+    anki_cached = len(db.all_anki_words(language))
     streak = compute_streak(db)
     total_words = sum(n for status, n in counts.items() if status != Status.SKIPPED.value)
 
@@ -549,12 +603,17 @@ def stats(as_json: bool = typer.Option(False, "--json", help="Машиночит
 @app.command()
 def doctor(
     as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
+    language: str | None = typer.Option(
+        None, "--language", "-l", help="Проверить только этот язык (по умолчанию — все вместе)"
+    ),
 ) -> None:
-    """Сверить approved/pushed карточки с включёнными enrich/images тумблерами (issue #9)."""
-    cfg = get_config()
+    """Сверить approved/pushed карточки с включёнными enrich/images тумблерами (issue #9).
+
+    Без --language — сводная проверка по всем языкам (см. stats — тот же issue #63 резон)."""
+    cfg = _cfg(language)
     db = _open_db(cfg)
 
-    cards = db.get_by_status(Status.APPROVED) + db.get_by_status(Status.PUSHED)
+    cards = db.get_by_status(Status.APPROVED, language) + db.get_by_status(Status.PUSHED, language)
     problems = find_inconsistencies(cards, cfg)
 
     # Сводка по картинкам (issue #73) — справочные числа, не Inconsistency и не
@@ -666,10 +725,12 @@ def _print_stats(stats: dict) -> None:
     console.print(table)
 
 
-def _level_totals(db: Database) -> dict[str, dict[str, int]]:
+def _level_totals(db: Database, language: str | None = None) -> dict[str, dict[str, int]]:
     """{level: {"total": N, "pushed": M}} — total считает все статусы кроме skipped,
-    чтобы отражать реальный словарный запас, а не отклонённые дубликаты."""
-    raw = db.count_by_level()
+    чтобы отражать реальный словарный запас, а не отклонённые дубликаты.
+    language — сузить до одного языка (issue #63); вызывается сразу после ingest
+    для этого языка, так что сводка не должна подмешивать другие языки."""
+    raw = db.count_by_level(language)
     result = {}
     for level, by_status in sorted(raw.items()):
         pushed = by_status.get(Status.PUSHED.value, 0)
