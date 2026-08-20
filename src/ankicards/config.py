@@ -298,6 +298,8 @@ class Secrets(BaseSettings):
 
     anthropic_api_key: str = ""
     openrouter_api_key: str = ""
+    openrouter_key_enrich: str = ""
+    openrouter_key_dedupe: str = ""
     unsplash_access_key: str = ""
     pexels_api_key: str = ""
     pixabay_api_key: str = ""

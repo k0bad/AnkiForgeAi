@@ -26,7 +26,7 @@ async def test_practical_transcription_loads_russian_prompt(
         seen["name"] = name
         return "prompt"
 
-    async def _fake_call_json(prompt: str) -> list[dict]:
+    async def _fake_call_json(prompt: str, **kwargs) -> list[dict]:
         return [{"id": card.id, "pronunciation": "хус"}]
 
     card = _card()
@@ -49,7 +49,7 @@ async def test_ipa_transcription_loads_ipa_prompt(monkeypatch: pytest.MonkeyPatc
 
     card = _card()
 
-    async def _fake_call_json(prompt: str) -> list[dict]:
+    async def _fake_call_json(prompt: str, **kwargs) -> list[dict]:
         return [{"id": card.id, "pronunciation": "/hʉːs/"}]
 
     monkeypatch.setattr(pronunciation_module, "get_config", lambda: _StubConfig("ipa"))

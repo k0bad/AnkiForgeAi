@@ -49,7 +49,7 @@ async def enrich_translation(card: Card) -> Card:
         return card
 
     prompt = load_prompt("translation", word=card.word, pos=card.pos.value)
-    raw = await call_text(prompt)
+    raw = await call_text(prompt, stage="enrich")
     ru, en = _parse_translation(raw)
     if en and " / " in en:
         # Модель иногда всё же сваливает EN: в тот же "sense1 / sense2" формат,

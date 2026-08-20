@@ -62,12 +62,15 @@ _llm_retry = retry(
 )
 
 
-def _client_openai(cfg: Config) -> Any:
-    """Создать OpenAI-клиент."""
+def _client_openai(cfg: Config, key: str | None = None) -> Any:
+    """Создать OpenAI-клиент. `key` переопределяет ключ из .env."""
     from openai import AsyncOpenAI
 
-    secrets = get_secrets()
-    api_key = secrets.openrouter_api_key or os.getenv("OPENROUTER_API_KEY") or ""
+    if key:
+        api_key = key
+    else:
+        secrets = get_secrets()
+        api_key = secrets.openrouter_api_key or os.getenv("OPENROUTER_API_KEY") or ""
     if not api_key:
         raise RuntimeError("OPENROUTER_API_KEY не задан. Проверь .env в корне проекта.")
 
@@ -114,12 +117,16 @@ def load_prompt(name: str, **kwargs: Any) -> str:
     return template
 
 
-async def call_text(prompt: str, cfg: Config | None = None, model: str | None = None) -> str:
+async def call_text(
+    prompt: str, cfg: Config | None = None, model: str | None = None, stage: str = ""
+) -> str:
     """Вызвать LLM и вернуть текстовый ответ.
 
     Провайдер выбирается из cfg.llm.provider. `model` переопределяет cfg.llm.model
-    только для этого вызова (например, дешёвая модель под простую бинарную задачу
-    типа dedupe.judge_review) — провайдер и его ключ остаются те же.
+    только для этого вызова. `stage` выбирает API-ключ для этой стадии:
+    - "enrich" → OPENROUTER_KEY_ENRICH
+    - "dedupe" → OPENROUTER_KEY_DEDUPE
+    - "" (default) → OPENROUTER_API_KEY
     """
     cfg = cfg or get_config()
     provider = cfg.llm.provider
@@ -128,7 +135,12 @@ async def call_text(prompt: str, cfg: Config | None = None, model: str | None = 
     if provider == "anthropic":
         return await _call_anthropic(prompt, cfg, model)
     elif provider == "openrouter":
-        return await _call_openai(prompt, cfg, model)
+        secrets = get_secrets()
+        stage_key = {
+            "enrich": secrets.openrouter_key_enrich,
+            "dedupe": secrets.openrouter_key_dedupe,
+        }.get(stage, "")
+        return await _call_openai(prompt, cfg, model, key=stage_key or None)
     elif provider == "claude_cli":
         return await _call_claude_cli(prompt, cfg, model)
     else:
@@ -138,12 +150,12 @@ async def call_text(prompt: str, cfg: Config | None = None, model: str | None = 
         )
 
 
-async def call_json(prompt: str, cfg: Config | None = None) -> Any:
+async def call_json(prompt: str, cfg: Config | None = None, stage: str = "") -> Any:
     """Вызвать LLM и распарсить ответ как JSON.
 
     Устойчив к обёрткам в ```json ... ``` code fences.
     """
-    raw = await call_text(prompt, cfg=cfg)
+    raw = await call_text(prompt, cfg=cfg, stage=stage)
     return _parse_json(raw)
 
 
@@ -172,8 +184,8 @@ async def _call_anthropic(prompt: str, cfg: Config, model: str) -> str:
 
 
 @_llm_retry
-async def _call_openai(prompt: str, cfg: Config, model: str) -> str:
-    client = _client_openai(cfg)
+async def _call_openai(prompt: str, cfg: Config, model: str, key: str | None = None) -> str:
+    client = _client_openai(cfg, key=key)
 
     response = await client.chat.completions.create(
         model=model,
