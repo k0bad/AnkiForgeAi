@@ -47,12 +47,19 @@ async def accept_cards(
     cfg: Config,
     auto_pick_images: bool = True,
     language: str | None = None,
+    verified: bool = False,
 ) -> dict[int, str]:
     """Принять карточки: enrich + media, затем approved (или review, если
     enrichment оказался неполным). Возвращает {card_id: итоговый статус}.
 
     auto_pick_images=False — см. enrich_and_generate_media: используется
     review_pending(), которое само подбирает картинку с человеком после этого вызова.
+
+    verified=True навешивает тег «человек посмотрел и одобрил» (Card.mark_verified).
+    Флагом, а не по умолчанию: эту же функцию дёргают скрипты и AI-агенты, и
+    отметка о личной проверке, поставленная автоматом, была бы просто неправдой.
+    Тег ставится и тем карточкам, что вернулись в review из-за неполного
+    enrichment: человек проверял слово и картинку, а не то, доехали ли формы.
     """
     cards = _require_cards(card_ids, db, language)
     if not cards:
@@ -65,8 +72,9 @@ async def accept_cards(
     for card in cards:
         assert card.id is not None
         card.status = Status.REVIEW if card.id in incomplete_ids else Status.APPROVED
+        tag = card.mark_verified() if verified else None
         db.update_card(card)
-        _record(db, "info", "review_finalized", card.id, status=card.status.value)
+        _record(db, "info", "review_finalized", card.id, status=card.status.value, verified=tag)
         results[card.id] = card.status.value
     return results
 

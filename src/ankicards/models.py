@@ -12,6 +12,12 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+# Префикс тега «эту карточку человек посмотрел глазами и одобрил» (Card.mark_verified).
+# Отдельно от auto_tags(): те выводятся из метаданных карточки и появляются сами,
+# а этот ставится только действием человека — импортированному материалу (ingest
+# bildetema и прочим чужим источникам) он на слово не выдаётся.
+VERIFIED_TAG_PREFIX = "verified"
+
 
 class POS(StrEnum):
     """Часть речи (Part Of Speech)."""
@@ -99,6 +105,23 @@ class Card(BaseModel):
 
     # Anki-specific (заполняется после push)
     anki_note_id: int | None = None
+
+    def mark_verified(self, day: date | None = None) -> str:
+        """Пометить карточку как просмотренную человеком; вернуть навешенный тег.
+
+        Тег иерархический (`verified::2026-08-21`), поэтому в Anki по `tag:verified::*`
+        находятся все проверенные разом, а по конкретной дате — то, что смотрелось в
+        тот заход. Повторный accept той же карточки тег не дублирует, но и дату
+        первой проверки не переписывает: важно, когда человек её увидел впервые.
+        """
+        tag = f"{VERIFIED_TAG_PREFIX}::{(day or date.today()).isoformat()}"
+        if not any(t.startswith(f"{VERIFIED_TAG_PREFIX}::") for t in self.tags):
+            self.tags.append(tag)
+        return tag
+
+    def is_verified(self) -> bool:
+        """Карточку уже подтверждал человек (см. mark_verified)."""
+        return any(t.startswith(f"{VERIFIED_TAG_PREFIX}::") for t in self.tags)
 
     def auto_tags(self) -> list[str]:
         """Сгенерировать иерархические теги Anki из метаданных."""

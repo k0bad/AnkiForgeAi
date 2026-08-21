@@ -104,8 +104,11 @@ async def _finalize_accepted(cards: list[Card], db: Database, cfg: Config) -> No
         assert card.id is not None  # уже в БД, id всегда назначен
         ids.append(card.id)
 
+    # verified=True без флага: сюда попадают только карточки, которые человек
+    # только что одобрил в questionary-цикле, глядя на поля и дубликаты. Это и
+    # есть личная проверка — в отличие от `review accept`, который зовут и скрипты.
     results = await actions.accept_cards(
-        ids, db, cfg, auto_pick_images=False, language=cfg.language
+        ids, db, cfg, auto_pick_images=False, language=cfg.language, verified=True
     )
     for card in cards:
         assert card.id is not None

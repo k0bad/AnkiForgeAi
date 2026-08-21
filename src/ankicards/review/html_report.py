@@ -305,6 +305,11 @@ button {{ font: inherit; cursor: pointer; }}
   margin: 0; font-size: 11px; text-transform: uppercase; letter-spacing: .09em;
   color: var(--muted); font-weight: 600;
 }}
+.commands .hint {{ margin: -4px 0 2px; color: var(--muted); font-size: 13px; max-width: 68ch; }}
+.commands code {{
+  padding: 1px 5px; border-radius: 4px; background: var(--ground);
+  border: 1px solid var(--edge); font-family: var(--mono); font-size: 12px;
+}}
 .commands pre {{
   margin: 0; padding: 12px 14px; overflow-x: auto;
   background: var(--ground); border: 1px solid var(--edge); border-radius: 7px;
@@ -403,6 +408,9 @@ button {{ font: inherit; cursor: pointer; }}
 
   <section class="commands" id="commands">
     <h2>Выполни в терминале</h2>
+    <p class="hint">Просмотр этой страницы и есть личная проверка, поэтому accept идёт
+    с <code>--verified</code>: карточки получат тег <code>verified::дата</code> и уедут
+    с ним в Anki.</p>
     <pre id="cmd-skip"></pre>
     <pre id="cmd-accept"></pre>
   </section>
@@ -451,7 +459,7 @@ button {{ font: inherit; cursor: pointer; }}
       ? 'ankiforgeai review skip ' + drop.join(' ')
       : '# отбрасывать нечего';
     document.getElementById('cmd-accept').textContent = keep.length
-      ? 'ankiforgeai review accept ' + keep.join(' ')
+      ? 'ankiforgeai review accept --verified ' + keep.join(' ')
       : '# принимать нечего';
     panel.classList.add('open');
     panel.scrollIntoView({{ behavior: 'smooth', block: 'nearest' }});

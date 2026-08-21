@@ -38,8 +38,20 @@ All notable changes to AnkiForgeAI will be documented in this file.
   `review skip ...` / `review accept ...` commands — the page decides nothing itself.
   Reviewing a hundred imported picture cards one at a time in the terminal is the wrong
   shape of tool when the actual question is "does this photo match this word".
+- `ankiforgeai review accept --verified` stamps a `verified::<YYYY-MM-DD>` tag on the
+  cards it accepts, and that tag travels into Anki with the note — `tag:verified::*`
+  then finds everything a human has actually looked at, and a specific date finds what
+  was reviewed in one sitting. It is a flag rather than the default because the same
+  command is what scripts and AI agents call, and a "I checked this personally" mark
+  put there by an automaton would simply be false. The interactive `ankiforgeai review`
+  loop passes it on its own (a person is sitting there deciding), and the `review html`
+  page emits the flag in the command it assembles, since viewing that page *is* the
+  review. Re-accepting a card neither duplicates the tag nor rewrites the first date.
 
 ### Changed
+- `Database.update_card()` now writes the `tags` column. It never did, so any tag added
+  after ingest — the `verified` one above included — was silently dropped on the next
+  save.
 - `run_ingest_pipeline()` gained `on_accepted` (runs right after INSERT, where cards
   first have an id and therefore deterministic media filenames) and `force_review`
   (accepted cards stay in `review` instead of `approved`).

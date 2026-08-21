@@ -180,6 +180,9 @@ ankiforgeai review
 # ...or review visually: one self-contained page with every photo and audio clip
 ankiforgeai review html
 
+# Accept cards and mark them as personally checked (tag verified::<date>, kept in Anki)
+ankiforgeai review accept --verified 12 13 14
+
 # Push approved cards to Anki
 ankiforgeai push
 

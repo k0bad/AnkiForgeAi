@@ -226,7 +226,7 @@ class Database:
             conn.execute(
                 """UPDATE cards SET
                     pronunciation = ?, translation = ?, example = ?, example_translation = ?,
-                    forms = ?, image = ?, audio = ?, status = ?
+                    forms = ?, image = ?, audio = ?, tags = ?, status = ?
                    WHERE id = ?""",
                 (
                     card.pronunciation,
@@ -236,6 +236,10 @@ class Database:
                     json.dumps(card.forms) if card.forms else None,
                     card.image,
                     card.audio,
+                    # tags попадают сюда, потому что их меняет не только ingest:
+                    # accept навешивает verified-тег (Card.mark_verified), и без
+                    # этой колонки он терялся бы на первом же update_card.
+                    json.dumps(card.tags),
                     card.status.value,
                     card.id,
                 ),

@@ -9,6 +9,7 @@
     review list                   Список pending/review-карточек (--json) — без TTY
     review html                   Страница ревью с фото и звуком (--out FILE) — без TTY
     review accept <id...>         Принять карточки (enrich + media → approved) — без TTY
+                                  --verified: тег verified::<дата>, «проверил лично»
     review skip/suspend <id...>   Отклонить/отложить карточки — без TTY
     review resume <id...>         Вернуть suspended/skipped обратно в review — без TTY
     review edit <id> -f k=v       Отредактировать поля карточки — без TTY
@@ -26,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from datetime import date
 from pathlib import Path
 
 import typer
@@ -562,17 +564,31 @@ _FIELD_OPT = typer.Option(..., "--field", "-f", help=_FIELD_HELP)
 @review_app.command("accept")
 def review_accept_cmd(
     card_ids: list[int] = _CARD_IDS_ARG,
+    verified: bool = typer.Option(
+        False,
+        "--verified",
+        help="Пометить тегом verified::<дата> — «я это проверил лично»",
+    ),
     as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
     language: str | None = _LANGUAGE_OPT,
 ) -> None:
-    """Принять карточки без TTY: enrich + media, затем approved."""
+    """Принять карточки без TTY: enrich + media, затем approved.
+
+    --verified навешивает тег verified::<сегодня>, который уезжает в Anki вместе с
+    карточкой: потом по `tag:verified::*` видно всё, что проходило через твои глаза,
+    а по конкретной дате — что смотрелось в тот заход. Без флага тег не ставится:
+    этой же командой пользуются скрипты, и отметка о личной проверке от них была бы
+    неправдой.
+    """
     cfg = _cfg(language)
     db = _open_db(cfg)
 
     with bound_run("review_accept"):
         try:
             results = asyncio.run(
-                review_actions.accept_cards(card_ids, db, cfg, language=cfg.language)
+                review_actions.accept_cards(
+                    card_ids, db, cfg, language=cfg.language, verified=verified
+                )
             )
         except ValueError as e:
             console.print(f"[red]✗[/] {e}")
@@ -584,6 +600,8 @@ def review_accept_cmd(
     for card_id, status in results.items():
         icon = "[green]✓[/]" if status == Status.APPROVED.value else "[yellow]⚠[/]"
         console.print(f"{icon} {card_id} → {status}")
+    if verified:
+        console.print(f"[green]✓[/] Помечены тегом verified::{date.today().isoformat()}")
 
 
 @review_app.command("skip")
