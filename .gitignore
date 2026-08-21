@@ -22,6 +22,10 @@ data/ankicards.db-journal
 data/ankicards.db-wal
 data/ankicards.db-shm
 data/logs/
+# кэш базы Bildetema (~29 МБ, скачивается сам при первом ingest)
+data/bildetema/
+# страницы `ankiforgeai review html`
+data/review/
 media/audio/*.mp3
 media/images/*.jpg
 media/images/*.png

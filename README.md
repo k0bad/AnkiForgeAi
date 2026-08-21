@@ -170,8 +170,15 @@ ankiforgeai ingest topic "mat" --count 20 --level A2
 # Extract words from a web page
 ankiforgeai ingest url "https://example.com/lesson"
 
+# Import a topic from the Bildetema picture dictionary — with its own photos and
+# human-recorded audio (`--list` shows the topic tree, `--dry-run` previews)
+ankiforgeai ingest bildetema "Klær"
+
 # Run interactive review
 ankiforgeai review
+
+# ...or review visually: one self-contained page with every photo and audio clip
+ankiforgeai review html
 
 # Push approved cards to Anki
 ankiforgeai push

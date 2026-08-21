@@ -1,0 +1,479 @@
+"""Тесты импорта из Bildetema: разбор базы, части речи, медиа, статус на выходе."""
+
+from __future__ import annotations
+
+import gzip
+import json
+from pathlib import Path
+
+import pytest
+
+from ankicards import pipeline
+from ankicards.config import (
+    AnkiConfig,
+    Config,
+    DedupeConfig,
+    EnrichConfig,
+    ImagesConfig,
+    IngestConfig,
+    LLMConfig,
+    LoggingConfig,
+    PathsConfig,
+    ReviewConfig,
+    TagsConfig,
+    TTSConfig,
+)
+from ankicards.db import Database
+from ankicards.ingest import bildetema
+from ankicards.models import POS, Card, Status
+
+
+def _word(word_id: str, label: str, article: str | None = None, order: int = 1) -> dict:
+    entry: dict = {
+        "id": word_id,
+        "labels": [{"label": label} | ({"article": article} if article else {})],
+        "images": [{"src": f"https://cdn/images/large/{word_id}a.jpeg"}],
+        "audioFiles": [{"url": f"https://cdn/audio/nob/{word_id}.mp3", "extension": "mp3"}],
+        "order": order,
+    }
+    return entry
+
+
+@pytest.fixture
+def database() -> dict:
+    """Мини-база в формате Bildetema: тема со своими словами + две подтемы.
+
+    Порядок слов в списке rus намеренно не совпадает с nob — сопоставление идёт
+    по id, и тест обязан ловить попытку связать их по позиции.
+    """
+    return {
+        "languages": [
+            {"code": "nob", "label": "Bokmål", "rtl": False},
+            {"code": "rus", "label": "Russisk", "rtl": False},
+            {"code": "eng", "label": "Engelsk", "rtl": False},
+        ],
+        "topics": [
+            {
+                "id": "T034",
+                "label": "Klær",
+                "order": 1,
+                "words": {
+                    "nob": [_word("V0376", "lue", "ei/en", order=1)],
+                    "rus": [_word("V0376", "шапка")],
+                    "eng": [_word("V0376", "winter hat")],
+                },
+                "subTopics": [
+                    {
+                        "id": "T035",
+                        "label": "Sko",
+                        "order": 1,
+                        "words": {
+                            "nob": [
+                                _word("V0451", "støvler", order=2),
+                                _word("V0450", "sko", "en", order=1),
+                            ],
+                            "rus": [_word("V0450", "ботинок"), _word("V0451", "сапоги")],
+                            "eng": [_word("V0450", "shoe"), _word("V0451", "boots")],
+                        },
+                        "subTopics": [],
+                    },
+                    {
+                        "id": "T036",
+                        "label": "Undertøy",
+                        "order": 2,
+                        "words": {
+                            "nob": [_word("V0436", "truse", "ei/en", order=1)],
+                            "rus": [],  # перевода нет — слово должно отвалиться
+                            "eng": [],
+                        },
+                        "subTopics": [],
+                    },
+                ],
+            },
+            {"id": "T013", "label": "Farger", "order": 2, "words": {}, "subTopics": []},
+        ],
+    }
+
+
+def _config(tmp_path: Path) -> Config:
+    return Config(
+        language="nb",
+        paths=PathsConfig(
+            db=tmp_path / "data" / "cards.db",
+            logs_dir=tmp_path / "logs",
+            audio_dir=tmp_path / "audio",
+            images_dir=tmp_path / "images",
+            prompts_dir=tmp_path / "prompts",
+        ),
+        anki=AnkiConfig(),
+        dedupe=DedupeConfig(ai_adjudication=False),
+        ingest=IngestConfig(),
+        llm=LLMConfig(),
+        tts=TTSConfig(),
+        images=ImagesConfig(enabled=False),
+        review=ReviewConfig(),
+        enrich=EnrichConfig(),
+        logging=LoggingConfig(),
+        tags=TagsConfig(),
+    )
+
+
+# ───────────────────────── дерево тем ─────────────────────────
+
+
+def test_list_topics_counts_include_subtopic_words(database: dict) -> None:
+    topics = {t.id: t for t in bildetema.list_topics(database)}
+
+    assert len(topics["T034"].word_ids) == 4  # своё слово + 2 из Sko + 1 из Undertøy
+    assert len(topics["T035"].word_ids) == 2
+    assert topics["T035"].full_label == "Klær / Sko"
+    assert topics["T013"].word_ids == set()
+
+
+def test_resolve_topic_by_id_label_and_substring(database: dict) -> None:
+    assert bildetema.resolve_topic(database, "T035").label == "Sko"
+    assert bildetema.resolve_topic(database, "klær").id == "T034"
+    assert bildetema.resolve_topic(database, "under").id == "T036"
+
+
+def test_resolve_topic_reports_unknown_topic(database: dict) -> None:
+    with pytest.raises(bildetema.BildetemaError, match="не найдена"):
+        bildetema.resolve_topic(database, "Sport")
+
+
+def test_resolve_language_rejects_language_absent_from_bildetema(database: dict) -> None:
+    assert bildetema.resolve_language("nb", bildetema.LANG_BY_PROFILE, database, "Язык") == "nob"
+    # Немецкого в Bildetema нет — молча импортировать не тот язык нельзя.
+    with pytest.raises(bildetema.BildetemaError, match="Доступны"):
+        bildetema.resolve_language("de", bildetema.LANG_BY_PROFILE, database, "Язык")
+
+
+# ───────────────────────── сборка карточек ─────────────────────────
+
+
+def _entries(database: dict, topic_query: str = "T034") -> list[bildetema.Entry]:
+    topic = bildetema.resolve_topic(database, topic_query)
+    return bildetema.build_entries(
+        database,
+        topic,
+        language="nb",
+        target_lang="nob",
+        translation_lang="rus",
+    )
+
+
+def test_build_entries_matches_translation_by_id_not_position(database: dict) -> None:
+    """В подтеме Sko порядок nob (støvler, sko) обратен порядку rus (ботинок, сапоги)."""
+    by_word = {e.card.word: e.card.translation for e in _entries(database)}
+
+    assert by_word["sko"] == "ботинок"
+    assert by_word["støvler"] == "сапоги"
+
+
+def test_build_entries_derives_pos_from_article(database: dict) -> None:
+    by_word = {e.card.word: e for e in _entries(database)}
+
+    assert by_word["lue"].card.pos is POS.NOUN
+    assert by_word["lue"].article == "ei/en"
+    # Артикля нет — часть речи тут ещё неизвестна, её доопределит classify_missing_pos.
+    assert by_word["støvler"].card.pos is POS.OTHER
+    assert by_word["støvler"].article is None
+
+
+def test_build_entries_skips_word_without_translation(database: dict) -> None:
+    words = {e.card.word for e in _entries(database)}
+
+    assert "truse" not in words  # rus-список подтемы Undertøy пуст
+    assert words == {"lue", "sko", "støvler"}
+
+
+def test_build_entries_keeps_subtopic_grouping(database: dict) -> None:
+    """`order` не сквозной по теме — у каждой подтемы своя нумерация с 1, поэтому
+    слова идут группами (сначала сама тема, потом подтемы), а не вперемешку."""
+    assert [e.card.word for e in _entries(database)] == ["lue", "sko", "støvler"]
+
+
+def test_build_entries_tags_word_with_its_deepest_subtopic(database: dict) -> None:
+    """Слово лежит и в подтеме, и в родительской теме. В тег идёт подтема:
+    «topic::klær::sko» в Anki полезнее плоского «topic::klær»."""
+    by_word = {e.card.word: e.card.topic for e in _entries(database)}
+
+    assert by_word["sko"] == "klær::sko"
+    assert by_word["lue"] == "klær"  # это слово живёт только в самой теме
+
+
+def test_build_entries_fills_card_metadata(database: dict) -> None:
+    card = next(e.card for e in _entries(database) if e.card.word == "lue")
+
+    assert card.language == "nb"
+    assert card.source == "bildetema:V0376"
+    assert card.topic == "klær"
+    assert card.status is Status.PENDING
+    assert card.image_query == "winter hat"
+    assert "topic::klær" in card.auto_tags()
+    assert "source::bildetema" in card.auto_tags()
+
+
+def test_topic_slug_strips_spaces_that_would_break_anki_tags(database: dict) -> None:
+    """Теги в Anki разделяются пробелами, поэтому «Klær / Sko» не может попасть
+    в тег как есть."""
+    topic = bildetema.resolve_topic(database, "T035")
+
+    assert topic.slug == "klær::sko"
+    assert " " not in topic.slug
+
+
+def test_build_entries_collects_media_urls(database: dict) -> None:
+    entry = next(e for e in _entries(database) if e.card.word == "lue")
+
+    assert entry.media.image_urls == ("https://cdn/images/large/V0376a.jpeg",)
+    assert entry.media.audio_url == "https://cdn/audio/nob/V0376.mp3"
+
+
+# ───────────────────────── часть речи ─────────────────────────
+
+
+async def test_classify_missing_pos_only_asks_about_words_without_article(
+    database: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entries = _entries(database)
+    asked: list[list[dict]] = []
+
+    async def _fake_call_json(prompt: str, **_: object) -> list[dict]:
+        asked.append(json.loads(prompt))
+        return [{"id": "V0451", "pos": "noun"}]
+
+    monkeypatch.setattr(bildetema, "load_prompt", lambda _name, **kw: kw["words_json"])
+    monkeypatch.setattr(bildetema, "call_json", _fake_call_json)
+
+    await bildetema.classify_missing_pos(entries)
+
+    assert [item["word"] for item in asked[0]] == ["støvler"]
+    assert next(e.card.pos for e in entries if e.card.word == "støvler") is POS.NOUN
+    assert next(e.card.pos for e in entries if e.card.word == "lue") is POS.NOUN
+
+
+async def test_classify_missing_pos_leaves_card_alone_when_llm_skips_it(
+    database: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entries = _entries(database)
+
+    async def _fake_call_json(prompt: str, **_: object) -> list[dict]:
+        return [{"id": "V0451", "pos": "нечто"}]
+
+    monkeypatch.setattr(bildetema, "load_prompt", lambda _name, **kw: kw["words_json"])
+    monkeypatch.setattr(bildetema, "call_json", _fake_call_json)
+
+    await bildetema.classify_missing_pos(entries)
+
+    assert next(e.card.pos for e in entries if e.card.word == "støvler") is POS.OTHER
+
+
+# ───────────────────────── база и кэш ─────────────────────────
+
+
+async def test_load_database_unpacks_gzip_and_caches_it(
+    tmp_path: Path, database: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _config(tmp_path)
+    calls = 0
+
+    async def _fake_download(url: str) -> bytes:
+        nonlocal calls
+        calls += 1
+        return gzip.compress(json.dumps(database).encode("utf-8"))
+
+    monkeypatch.setattr(bildetema, "_download", _fake_download)
+
+    first = await bildetema.load_database(cfg)
+    second = await bildetema.load_database(cfg)
+
+    assert calls == 1, "второе обращение обязано читать кэш, а не ходить в сеть"
+    assert first["topics"][0]["id"] == second["topics"][0]["id"] == "T034"
+    assert bildetema.cache_path(cfg).exists()
+
+
+async def test_load_database_rejects_payload_that_is_not_gzip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _fake_download(url: str) -> bytes:
+        return b"<html>404</html>"
+
+    monkeypatch.setattr(bildetema, "_download", _fake_download)
+
+    with pytest.raises(bildetema.BildetemaError, match="не gzip"):
+        await bildetema.load_database(_config(tmp_path))
+
+
+# ───────────────────────── медиа ─────────────────────────
+
+
+async def test_attach_media_matches_cards_by_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """dedupe выкидывает часть карточек, так что позиция в списке не годится
+    как ключ — медиа ищется по card.source."""
+    cfg = _config(tmp_path)
+    downloaded: dict[str, str] = {}
+
+    async def _fake_image(url: str, out_path: Path, _cfg: Config) -> None:
+        downloaded[out_path.name] = url
+
+    async def _fake_audio(url: str, out_path: Path) -> None:
+        downloaded[out_path.name] = url
+
+    monkeypatch.setattr(bildetema, "download_image", _fake_image)
+    monkeypatch.setattr(bildetema, "_download_audio", _fake_audio)
+
+    card = Card(
+        id=7,
+        language="nb",
+        word="lue",
+        pos=POS.NOUN,
+        translation="шапка",
+        source="bildetema:V0376",
+    )
+    media = {
+        "bildetema:V0376": bildetema.Media(("https://cdn/a.jpeg",), "https://cdn/a.mp3"),
+        "bildetema:V9999": bildetema.Media(("https://cdn/other.jpeg",), None),
+    }
+
+    stats = await bildetema.attach_media([card], media, cfg)
+
+    assert card.image == "7.jpg"
+    assert card.audio == "7_nb.mp3"
+    assert downloaded == {"7.jpg": "https://cdn/a.jpeg", "7_nb.mp3": "https://cdn/a.mp3"}
+    assert stats == {"images": 1, "audio": 1, "failed": 0}
+
+
+async def test_attach_media_survives_failed_download(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Не скачалось — карточка просто остаётся без картинки, обычная media-стадия
+    подхватит её как любую другую."""
+    cfg = _config(tmp_path)
+
+    async def _boom(url: str, out_path: Path, _cfg: Config) -> None:
+        raise RuntimeError("502")
+
+    async def _fake_audio(url: str, out_path: Path) -> None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(b"mp3")
+
+    monkeypatch.setattr(bildetema, "download_image", _boom)
+    monkeypatch.setattr(bildetema, "_download_audio", _fake_audio)
+
+    card = Card(
+        id=3,
+        language="nb",
+        word="sko",
+        pos=POS.NOUN,
+        translation="ботинок",
+        source="bildetema:V0450",
+    )
+    stats = await bildetema.attach_media(
+        [card],
+        {"bildetema:V0450": bildetema.Media(("https://cdn/x.jpeg",), "https://cdn/x.mp3")},
+        cfg,
+    )
+
+    assert card.image is None
+    assert card.audio == "3_nb.mp3"
+    assert stats["failed"] == 1
+
+
+# ───────────────────────── стыковка с pipeline ─────────────────────────
+
+
+async def test_pipeline_runs_hook_before_enrichment_and_keeps_cards_in_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """on_accepted обязан отработать до media-стадии: она смотрит на файлы на диске,
+    чтобы не переозвучить уже скачанное аудио."""
+    cfg = _config(tmp_path)
+    db = Database(tmp_path / "cards.db")
+    order: list[str] = []
+
+    async def _hook(cards: list[Card]) -> None:
+        order.append("hook")
+        for card in cards:
+            path = cfg.paths.audio_dir / f"{card.id}_nb.mp3"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"bildetema")
+            card.audio = path.name
+
+    async def _tts(card: Card, _cfg: Config) -> Card:
+        order.append("tts")
+        (cfg.paths.audio_dir / f"{card.id}_nb.mp3").write_bytes(b"edge-tts")
+        return card
+
+    monkeypatch.setattr(pipeline, "generate_audio", _tts)
+
+    card = Card(language="nb", word="lue", pos=POS.NOUN, translation="шапка")
+    stats = await pipeline.run_ingest_pipeline(
+        [card], db=db, cfg=cfg, auto_enrich=False, on_accepted=_hook, force_review=True
+    )
+
+    assert order == ["hook"], "edge-tts не должен затирать уже скачанное аудио"
+    assert stats["media_reused"] == 1
+    assert (cfg.paths.audio_dir / "1_nb.mp3").read_bytes() == b"bildetema"
+
+    saved = db.get_by_status(Status.REVIEW)
+    assert [c.word for c in saved] == ["lue"]
+    assert db.get_by_status(Status.APPROVED) == []
+
+
+async def test_pipeline_regenerates_audio_when_file_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Имя в БД есть, а файла нет (не доехал, удалили руками) — озвучиваем заново."""
+    cfg = _config(tmp_path)
+    db = Database(tmp_path / "cards.db")
+    generated: list[int] = []
+
+    async def _tts(card: Card, _cfg: Config) -> Card:
+        assert card.id is not None
+        generated.append(card.id)
+        return card
+
+    monkeypatch.setattr(pipeline, "generate_audio", _tts)
+
+    card = Card(language="nb", word="lue", pos=POS.NOUN, translation="шапка", audio="1_nb.mp3")
+    await pipeline.run_ingest_pipeline([card], db=db, cfg=cfg, auto_enrich=False)
+
+    assert generated == [1]
+
+
+async def test_classify_missing_pos_survives_llm_outage(
+    database: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Провайдер прилёг — слова, переводы, фото и аудио у нас уже есть, и терять
+    их из-за неуточнённой части речи нельзя."""
+    entries = _entries(database)
+
+    async def _boom(prompt: str, **_: object) -> list[dict]:
+        raise RuntimeError("claude CLI завершился с кодом 1")
+
+    monkeypatch.setattr(bildetema, "load_prompt", lambda _name, **kw: kw["words_json"])
+    monkeypatch.setattr(bildetema, "call_json", _boom)
+
+    await bildetema.classify_missing_pos(entries)
+
+    assert next(e.card.pos for e in entries if e.card.word == "støvler") is POS.OTHER
+    assert next(e.card.pos for e in entries if e.card.word == "lue") is POS.NOUN
+
+
+def test_merge_stats_sums_flat_counters_and_nested_image_breakdown() -> None:
+    """Импорт идёт пачками, и сводка в конце должна складывать их, а не показывать
+    последнюю: images приходит вложенным словарём (см. enrich_and_generate_media)."""
+    from ankicards.cli import _merge_stats
+
+    total: dict = {}
+    _merge_stats(total, {"new": 3, "merged": 1, "images": {"found": 3, "skipped_not_noun": 0}})
+    _merge_stats(total, {"new": 2, "merged": 0, "images": {"found": 1, "skipped_not_noun": 1}})
+
+    assert total == {
+        "new": 5,
+        "merged": 1,
+        "images": {"found": 4, "skipped_not_noun": 1},
+    }

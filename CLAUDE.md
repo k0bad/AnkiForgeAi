@@ -17,7 +17,12 @@ uv pip install -e ".[dev]"
 # CLI entry point (script name is `ankiforgeai`, package/import name is `ankicards`)
 ankiforgeai ingest topic "еда" --count 20 --level A2
 ankiforgeai ingest url https://...
+ankiforgeai ingest bildetema "Klær"   # импорт темы картинного словаря Bildetema
+                                      # (--list — дерево тем, --dry-run — предпросмотр);
+                                      # тащит их собственные фото и живое аудио, карточки
+                                      # всегда встают в review, не в approved
 ankiforgeai review
+ankiforgeai review html     # страница ревью со всеми фото и аудио одним файлом
 ankiforgeai push
 ankiforgeai sync
 ankiforgeai stats
@@ -82,9 +87,11 @@ Review can interrupt at any stage — user sees pending/review cards and accepts
 | `anki/connect.py` | Async HTTP client for AnkiConnect API (port 8765) |
 | `anki/notetype.py` | LanguageCard note type definition: 12 fields, HTML/CSS templates |
 | `ingest/topic.py` | Calls Claude with `prompts/topic_words.md` → `list[Card]` |
+| `ingest/bildetema.py` | Импорт из Bildetema (NAFO/OsloMet): вся база — один gzip-JSON с CDN, ~1100 слов, свои фото и аудио диктора; POS по артиклю + добор LLM (`prompts/pos_classify.md`) |
 | `enrich/grammar.py` | Calls Claude with `prompts/grammar_forms.md` → populates `card.forms` |
 | `media/tts.py` | edge-tts → `{card.id}_nb.mp3` in `media/audio/` |
 | `media/images.py` | Provider from `images.provider` (unsplash/pexels/pixabay/openverse) → `{card.id}.jpg` in `media/images/` (nouns only) |
+| `review/html_report.py` | Самодостаточная HTML-страница ревью: фото и mp3 вшиты как data: URI, на выходе — готовые `review skip/accept` для терминала |
 | `review/interactive.py` | rich + questionary terminal UI; `accept` batches enrich/media via `pipeline.enrich_and_generate_media()` at session end |
 
 ## Principles

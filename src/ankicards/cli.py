@@ -4,8 +4,10 @@
     about                          Версия, ссылки на roadmap/changelog/issues
     ingest url <URL>              Парсинг страницы
     ingest topic <TOPIC>          Генерация по теме через Claude
+    ingest bildetema <TOPIC>      Импорт темы из картинного словаря Bildetema (со своими фото/аудио)
     review                        Интерактивный ревью pending (нужен TTY)
     review list                   Список pending/review-карточек (--json) — без TTY
+    review html                   Страница ревью с фото и звуком (--out FILE) — без TTY
     review accept <id...>         Принять карточки (enrich + media → approved) — без TTY
     review skip/suspend <id...>   Отклонить/отложить карточки — без TTY
     review resume <id...>         Вернуть suspended/skipped обратно в review — без TTY
@@ -24,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -51,12 +54,13 @@ from .doctor import (
     count_images_skipped_not_noun,
     find_inconsistencies,
 )
+from .ingest import bildetema
 from .ingest.topic import ingest_by_topic
 from .ingest.url import ingest_from_url
 from .log import bound_run, get_logger
 from .migrate_ids import migrate_ids as run_migrate_ids
 from .migrate_ids import needs_migration
-from .models import Status
+from .models import Card, Level, Status
 from .pipeline import (
     NoteTypeMissingError,
     check_level_progress,
@@ -65,6 +69,7 @@ from .pipeline import (
     run_ingest_pipeline,
 )
 from .review import actions as review_actions
+from .review import html_report
 from .review.interactive import review_pending
 
 logger = get_logger(__name__)
@@ -301,6 +306,159 @@ def ingest_topic_cmd(
         _print_level_totals(level_totals)
 
 
+_REVIEW_OUT_OPT = typer.Option(
+    None, "--out", "-o", help="Куда положить файл (по умолчанию data/review/review-<язык>.html)"
+)
+_BILDETEMA_TOPIC_ARG = typer.Argument(
+    None, help="Тема Bildetema: id (T034), метка целиком (Klær) или её кусок (frukt)"
+)
+
+
+@ingest_app.command("bildetema")
+def ingest_bildetema_cmd(
+    topic: str | None = _BILDETEMA_TOPIC_ARG,
+    show_list: bool = typer.Option(False, "--list", help="Показать темы Bildetema и выйти"),
+    level: str = typer.Option("A1", help="CEFR уровень импортируемых карточек"),
+    limit: int | None = typer.Option(None, help="Взять только первые N слов темы"),
+    translation_lang: str | None = typer.Option(
+        None,
+        "--translation-lang",
+        help="Язык перевода: ru/en или код Bildetema (rus, ukr, ara...); дефолт — ui_language",
+    ),
+    refresh: bool = typer.Option(False, "--refresh", help="Перекачать базу Bildetema мимо кэша"),
+    enrich: bool = typer.Option(
+        True, "--enrich/--no-enrich", help="Досыпать формы/примеры/транскрипцию через LLM"
+    ),
+    batch_size: int = typer.Option(
+        25, "--batch-size", min=1, help="Сколько слов гнать через pipeline за один заход"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Показать, что импортируется, ничего не записывая"
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
+    language: str | None = _LANGUAGE_OPT,
+) -> None:
+    """Импорт темы из картинного словаря Bildetema (NAFO / OsloMet).
+
+    Слова, переводы, фотографии и записанное диктором аудио берутся с их CDN, так
+    что LLM остаётся только грамматика и примеры. Карточки всегда встают в review,
+    даже когда всё обогатилось: материал чужой, и каждую надо увидеть глазами перед
+    push — `ankiforgeai review html` или `ankiforgeai review`.
+    """
+    cfg = _cfg(language)
+
+    try:
+        database = asyncio.run(bildetema.load_database(cfg, refresh=refresh))
+        target_lang = bildetema.resolve_language(
+            cfg.language, bildetema.LANG_BY_PROFILE, database, "Изучаемого языка"
+        )
+        if show_list or topic is None:
+            _print_bildetema_topics(database, target_lang, as_json=as_json)
+            return
+
+        translation = bildetema.resolve_language(
+            translation_lang or cfg.ui_language, bildetema.LANG_BY_UI, database, "Языка перевода"
+        )
+        if translation == target_lang:
+            raise bildetema.BildetemaError(
+                f"Язык перевода совпал с изучаемым ({target_lang}) — задай --translation-lang"
+            )
+        node = bildetema.resolve_topic(database, topic, target_lang)
+    except bildetema.BildetemaError as e:
+        console.print(f"[red]✗[/] {e}")
+        raise typer.Exit(code=1) from e
+
+    try:
+        level_enum = Level(level.lower())
+    except ValueError as e:
+        console.print(f"[red]✗[/] Неизвестный уровень {level!r} (A1..C2)")
+        raise typer.Exit(code=1) from e
+
+    entries = bildetema.build_entries(
+        database,
+        node,
+        language=cfg.language,
+        target_lang=target_lang,
+        translation_lang=translation,
+        level=level_enum,
+    )
+    if limit is not None:
+        entries = entries[:limit]
+    if not entries:
+        console.print(f"[yellow]![/] В теме «{node.full_label}» нет слов для {target_lang}")
+        raise typer.Exit(code=1)
+
+    if dry_run:
+        _print_bildetema_preview(node, entries, as_json=as_json)
+        return
+
+    db = _open_db(cfg)
+    media = {entry.card.source or "": entry.media for entry in entries}
+
+    async def _download_media(cards: list[Card]) -> None:
+        media_stats = await bildetema.attach_media(cards, media, cfg)
+        if not as_json:
+            console.print(
+                f"[cyan]→[/] Медиа Bildetema: {media_stats['images']} фото, "
+                f"{media_stats['audio']} аудио, ошибок {media_stats['failed']}"
+            )
+
+    # Пачками, а не темой целиком. Каждая enrich-стадия — это один LLM-вызов на весь
+    # переданный список, а темы тут крупные (у «Mat og drikke» 143 слова): ответ с
+    # грамматическими формами на сотню существительных упирается в llm.max_tokens, и
+    # тогда формы теряет разом вся тема, а не одна пачка. Плюс виден прогресс, и обрыв
+    # на середине (сеть, лимиты провайдера) не отменяет уже импортированное — карточки
+    # сохраняются пачка за пачкой.
+    batches = [entries[i : i + batch_size] for i in range(0, len(entries), batch_size)]
+
+    async def _run() -> dict:
+        if not as_json:
+            console.print(
+                f"[cyan]→[/] «{node.full_label}»: {len(entries)} слов из Bildetema"
+                + (f", пачками по {batch_size}" if len(batches) > 1 else "")
+            )
+        total: dict = {}
+        for number, batch in enumerate(batches, start=1):
+            if len(batches) > 1 and not as_json:
+                console.print(f"[dim]— пачка {number}/{len(batches)} ({len(batch)} слов)[/]")
+            if enrich:
+                await bildetema.classify_missing_pos(batch)
+            try:
+                stats = await run_ingest_pipeline(
+                    [entry.card for entry in batch],
+                    db=db,
+                    cfg=cfg,
+                    auto_enrich=enrich,
+                    on_accepted=_download_media,
+                    force_review=True,
+                )
+            except Exception as e:
+                # Упавшая пачка не отменяет уже импортированные: карточки сохраняются
+                # по мере готовности, и повторный запуск той же темы доберёт остаток —
+                # dedupe отбросит то, что уже лежит в БД.
+                logger.warning("bildetema.batch_failed", batch=number, error=str(e))
+                _merge_stats(total, {"batches_failed": 1})
+                if not as_json:
+                    console.print(f"[red]✗[/] пачка {number} сорвалась: {e}")
+                continue
+            _merge_stats(total, stats)
+        return total
+
+    with bound_run("ingest_bildetema"):
+        stats = asyncio.run(_run())
+
+    level_totals = _level_totals(db, cfg.language)
+    if as_json:
+        print(json.dumps({**stats, "level_totals": level_totals}, ensure_ascii=False, indent=2))
+    else:
+        _print_stats(stats)
+        _print_level_totals(level_totals)
+        console.print(
+            "[green]✓[/] Карточки ждут ревью: `ankiforgeai review html` (визуально, с фото) "
+            "или `ankiforgeai review`"
+        )
+
+
 @review_app.callback(invoke_without_command=True)
 def review(ctx: typer.Context, language: str | None = _LANGUAGE_OPT) -> None:
     """Без подкоманды — интерактивный ревью pending-карточек (нужен TTY)."""
@@ -341,6 +499,57 @@ def review_list_cmd(
     for c in cards:
         table.add_row(str(c.id), c.word, c.pos.value, c.translation, c.status.value)
     console.print(table)
+
+
+@review_app.command("html")
+def review_html_cmd(
+    out: Path | None = _REVIEW_OUT_OPT,
+    topic: str | None = typer.Option(
+        None, help="Только карточки, у которых topic содержит эту строку (напр. klær)"
+    ),
+    include_audio: bool = typer.Option(
+        True, "--audio/--no-audio", help="Вшивать mp3 в страницу (крупнее файл, но слышно диктора)"
+    ),
+    fragment: bool = typer.Option(
+        False, "--fragment", help="Без <html>/<head>/<body> — годится для публикации Artifact'ом"
+    ),
+    language: str | None = _LANGUAGE_OPT,
+) -> None:
+    """Собрать HTML-страницу ревью: все карточки review/pending с фото и звуком.
+
+    Ничего не меняет в БД — на выходе страница, где карточки отмечаются к отбраковке,
+    а кнопка собирает готовые `review skip ...` / `review accept ...` для терминала.
+    """
+    cfg = _cfg(language)
+    db = _open_db(cfg)
+
+    cards = db.get_by_status(Status.REVIEW, cfg.language) + db.get_by_status(
+        Status.PENDING, cfg.language
+    )
+    if topic:
+        needle = topic.casefold()
+        cards = [c for c in cards if c.topic and needle in c.topic.casefold()]
+    cards.sort(key=lambda c: c.id or 0)
+
+    if not cards:
+        console.print("[green]Нечего ревьюить.[/]")
+        return
+
+    path = out or (cfg.paths.db.parent / "review" / f"review-{cfg.language}.html")
+    subtitle = (
+        f"{len(cards)} карточек ждут решения. Отметь неподходящие — внизу появятся "
+        "команды для терминала."
+    )
+    markup = html_report.build_report(
+        cards,
+        cfg,
+        title=f"Ревью {topic or cfg.language}",
+        subtitle=subtitle,
+        include_audio=include_audio,
+        standalone=not fragment,
+    )
+    size = html_report.write_report(path, markup)
+    console.print(f"[green]✓[/] {path} ({size / 1024 / 1024:.1f} МБ, {len(cards)} карточек)")
 
 
 _CARD_IDS_ARG = typer.Argument(..., help="ID карточек (см. review list)")
@@ -714,6 +923,97 @@ def migrate_ids_cmd(
         for new_id, error in result.anki_failed:
             console.print(f"    id={new_id}: {error}")
     console.print(f"[dim]Резервная копия: {result.backup_path}[/]")
+
+
+def _merge_stats(total: dict, batch: dict) -> None:
+    """Сложить статистику пачки в общую. images приходит вложенным словарём
+    счётчиков (см. pipeline.enrich_and_generate_media), остальное — плоские числа."""
+    for key, value in batch.items():
+        if isinstance(value, dict):
+            nested = total.setdefault(key, {})
+            for sub_key, sub_value in value.items():
+                nested[sub_key] = nested.get(sub_key, 0) + sub_value
+        else:
+            total[key] = total.get(key, 0) + value
+
+
+def _print_bildetema_topics(database: dict, lang: str, as_json: bool = False) -> None:
+    """Дерево тем Bildetema. Подтемы идут в том же списке с отступом — импортировать
+    можно и то, и другое, поэтому прятать их не за чем."""
+    topics = bildetema.list_topics(database, lang)
+    if as_json:
+        print(
+            json.dumps(
+                [
+                    {
+                        "id": t.id,
+                        "label": t.label,
+                        "path": list(t.path),
+                        "slug": t.slug,
+                        "words": len(t.word_ids),
+                    }
+                    for t in topics
+                ],
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+
+    table = Table(title=f"Темы Bildetema ({lang})")
+    table.add_column("id", style="dim")
+    table.add_column("Тема")
+    table.add_column("Слов", justify="right")
+    for t in topics:
+        depth = len(t.path) - 1
+        label = "  " * depth + t.label
+        table.add_row(t.id, label if depth else f"[cyan]{label}[/]", str(len(t.word_ids)))
+    console.print(table)
+
+
+def _print_bildetema_preview(
+    node: bildetema.TopicInfo, entries: list[bildetema.Entry], as_json: bool = False
+) -> None:
+    """--dry-run: что именно уедет в pipeline. Часть речи тут ещё «сырая» —
+    classify_missing_pos() не звалась, так что бесартиклевые слова показаны как other."""
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "topic": {"id": node.id, "label": node.full_label, "slug": node.slug},
+                    "cards": [
+                        {
+                            **e.card.model_dump(mode="json"),
+                            "article": e.article,
+                            "images": len(e.media.image_urls),
+                            "audio": bool(e.media.audio_url),
+                        }
+                        for e in entries
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+
+    table = Table(title=f"{node.full_label} — {len(entries)} слов (--dry-run, ничего не записано)")
+    table.add_column("id", style="dim")
+    table.add_column("Слово", style="cyan")
+    table.add_column("Артикль")
+    table.add_column("POS")
+    table.add_column("Перевод")
+    table.add_column("Фото", justify="right")
+    for e in entries:
+        table.add_row(
+            e.word_id,
+            e.card.word,
+            e.article or "—",
+            e.card.pos.value,
+            e.card.translation,
+            str(len(e.media.image_urls)),
+        )
+    console.print(table)
 
 
 def _print_stats(stats: dict) -> None:

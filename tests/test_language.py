@@ -1,4 +1,5 @@
 """Тесты мультиязычного слоя."""
+
 from ankicards.config import get_language
 
 
@@ -49,5 +50,6 @@ def test_default_language_is_norwegian():
 def test_unknown_language_raises():
     """Несуществующий язык — FileNotFoundError."""
     import pytest
+
     with pytest.raises(FileNotFoundError):
         get_language("xx")

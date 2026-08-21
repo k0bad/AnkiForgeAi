@@ -4,7 +4,49 @@ All notable changes to AnkiForgeAI will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `ankiforgeai ingest bildetema <TOPIC>` — imports words from the Bildetema picture
+  dictionary (NAFO / OsloMet, https://nybildetema.oslomet.no) together with **its own
+  photographs and human-recorded audio**, so a card arrives already illustrated and
+  pronounced instead of going through edge-tts and a stock-photo search. The site is a
+  SPA but needs no HTML scraping: the whole catalogue ships as one gzipped JSON
+  (~1100 words across 21 topics, labels in 28 languages including `nob` and `rus`),
+  cached under `data/bildetema/database.json` and re-downloaded only on `--refresh`.
+  `--list` prints the topic tree, `--dry-run` shows what would be imported without
+  touching the DB, `--translation-lang` picks the back-of-card language (defaults to
+  `ui_language`). Bildetema has no German, so `-l de` fails with the list of languages
+  it does have.
+  Part of speech is not in their data: nouns are recognised by the `article` field
+  (`en` / `ei/en` / `et`), and the remaining ~20% (adjectives, plurale tantum, mass
+  nouns) are resolved by one batched LLM call over the new `prompts/pos_classify.md` —
+  without it they would all land as `other` and lose grammatical forms at the enrich
+  stage. Grammar, examples and pronunciation still come from the usual enrich stages;
+  `--no-enrich` skips every LLM call.
+  Imported cards always end up in `review`, never `approved` — the material is
+  third-party and each card is meant to be looked at before push.
+  The import runs in batches (`--batch-size`, default 25) rather than one pass over the
+  whole topic: each enrich stage is a single LLM call over everything handed to it, and
+  grammatical forms for a hundred nouns do not fit in `llm.max_tokens` — one oversized
+  call would cost the whole topic its forms. Batching also shows progress and makes a
+  mid-run failure (network, provider limits) survivable: cards are saved batch by batch,
+  a failed batch is reported and skipped rather than aborting the run, and re-running the
+  same topic picks up the rest because dedupe drops what already landed.
+- `ankiforgeai review html` — a self-contained review page for every `review`/`pending`
+  card: photo, headword, forms, example, and an inline player for the audio, all
+  embedded as `data:` URIs so the file works offline and can be published as-is. Cards
+  are marked for rejection by clicking, and a button assembles the matching
+  `review skip ...` / `review accept ...` commands — the page decides nothing itself.
+  Reviewing a hundred imported picture cards one at a time in the terminal is the wrong
+  shape of tool when the actual question is "does this photo match this word".
+
 ### Changed
+- `run_ingest_pipeline()` gained `on_accepted` (runs right after INSERT, where cards
+  first have an id and therefore deterministic media filenames) and `force_review`
+  (accepted cards stay in `review` instead of `approved`).
+- The media stage now skips a card whose media file is already on disk, counting it as
+  `media_reused` instead of regenerating it. Without this, TTS would overwrite
+  Bildetema's recorded audio and an image search would overwrite its photograph — both
+  on import and again on the `review` → `accept` path, which re-runs enrichment.
 - `images.fallback_providers` now defaults to `[pexels, pixabay, openverse]` instead of
   `[]` — a noun with no results from `images.provider` (Unsplash's catalog is missing
   many common everyday nouns) now cascades through the other providers before giving up,

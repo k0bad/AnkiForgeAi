@@ -12,6 +12,7 @@ Guides user through:
 8. Optional: registers the daily-automation cycle with the OS scheduler
    (Task Scheduler / cron) via .scheduler.register_daily_automation
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -193,8 +194,7 @@ def run_setup() -> None:
     console.print()
     console.print(
         Panel.fit(
-            "🧠 AnkiForgeAI — First-time Setup\n"
-            "Configure your flashcard pipeline in a few steps.",
+            "🧠 AnkiForgeAI — First-time Setup\nConfigure your flashcard pipeline in a few steps.",
             border_style="cyan",
         )
     )
@@ -240,9 +240,7 @@ def run_setup() -> None:
             questionary.Choice(
                 "Practical transcription (Cyrillic, for Russian speakers)", value="practical"
             ),
-            questionary.Choice(
-                "IPA (International Phonetic Alphabet, universal)", value="ipa"
-            ),
+            questionary.Choice("IPA (International Phonetic Alphabet, universal)", value="ipa"),
         ],
     ).ask()
 
@@ -272,25 +270,19 @@ def run_setup() -> None:
                 env_updates[image_key_var] = image_api_key
     show_grammar = questionary.confirm("Show grammar table on back?", default=True).ask()
     show_examples = questionary.confirm("Show example sentences?", default=True).ask()
-    show_pronunciation = questionary.confirm(
-        "Show pronunciation hints?", default=True
-    ).ask()
+    show_pronunciation = questionary.confirm("Show pronunciation hints?", default=True).ask()
     auto_accept = questionary.confirm(
         "Auto-accept words without manual review? (recommended for daily cron)",
         default=True,
     ).ask()
 
-    words_per_day = int(
-        questionary.text("How many words per day?", default="10").ask() or "10"
-    )
+    words_per_day = int(questionary.text("How many words per day?", default="10").ask() or "10")
 
     # ─── 4. LLM provider ───
     provider = questionary.select(
         "Which LLM provider?",
         choices=[
-            questionary.Choice(
-                "OpenRouter (recommended, many models)", value="openrouter"
-            ),
+            questionary.Choice("OpenRouter (recommended, many models)", value="openrouter"),
             questionary.Choice("Anthropic Claude (API key)", value="anthropic"),
             questionary.Choice(
                 "Claude Code CLI — no API key, uses your `claude login`"

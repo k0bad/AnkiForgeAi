@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import date, timedelta
+from pathlib import Path
 
 from .anki.connect import AnkiConnect, AnkiConnectError
 from .anki.notetype import _get_note_type_name as get_note_type_name
@@ -65,6 +66,14 @@ def delete_card_record(db: Database, card: Card, action: str) -> None:
     assert card.id is not None, "delete_card_record ожидает уже сохранённую карточку"
     _record(db, "info", action, card.id, word=card.word, anki_note_id=card.anki_note_id)
     db.delete_card(card.id)
+
+
+def _has_media_file(filename: str | None, directory: Path) -> bool:
+    """Медиафайл уже лежит на диске. В БД хранится только имя (CLAUDE.md принцип 6),
+    поэтому заполненного поля мало — файл мог не доехать или быть удалён вручную."""
+    if not filename:
+        return False
+    return (directory / filename).exists()
 
 
 def _card_id(card: Card) -> int:
@@ -258,7 +267,20 @@ async def enrich_and_generate_media(
             stats["audio"] += 1
             _record(db, "info", "audio_generated", card.id)
 
-        tasks = [_generate_audio_one(card) for card in cards]
+        # Карточку, которой медиафайл уже принесла другая стадия, не трогаем:
+        # `ingest bildetema` качает фото и записанное диктором аудио прямо с CDN
+        # Bildetema, и TTS лёг бы поверх живой записи, а поиск в Unsplash — поверх
+        # картинки, гарантированно соответствующей слову. Ровно то же спасает от
+        # лишней перегенерации на пути review → accept, где enrichment гоняется
+        # повторно для карточек, у которых часть стадий уже отработала.
+        stats["media_reused"] = 0
+        audio_targets = []
+        for card in cards:
+            if _has_media_file(card.audio, cfg.paths.audio_dir):
+                stats["media_reused"] += 1
+            else:
+                audio_targets.append(card)
+        tasks = [_generate_audio_one(card) for card in audio_targets]
 
         # Картинки для существительных (если включено в конфиге). Разбивка по
         # причине отсутствия (issue #54): "не тот POS" — норма, для остальных
@@ -281,7 +303,10 @@ async def enrich_and_generate_media(
                     stats["images"]["failed_no_result"] += 1
 
             for card in cards:
-                if card.pos.value not in cfg.images.only_for_pos:
+                if _has_media_file(card.image, cfg.paths.images_dir):
+                    stats["images"]["found"] += 1
+                    stats["media_reused"] += 1
+                elif card.pos.value not in cfg.images.only_for_pos:
                     stats["images"]["skipped_not_noun"] += 1
                 else:
                     tasks.append(_attach_image_one(card))
@@ -297,8 +322,20 @@ async def run_ingest_pipeline(
     cfg: Config,
     auto_enrich: bool = True,
     auto_media: bool = True,
+    on_accepted: Callable[[list[Card]], Awaitable[None]] | None = None,
+    force_review: bool = False,
 ) -> dict:
     """Прогнать кандидатов через dedupe → enrich → media → save.
+
+    on_accepted вызывается для карточек, прошедших dedupe, сразу после INSERT и
+    до enrichment — то есть в первой точке, где у карточки уже есть id, а значит
+    и детерминированные имена медиафайлов (CLAUDE.md принцип 6). Через него
+    `ingest bildetema` подкладывает готовое фото и аудио с их CDN: media-стадия
+    ниже видит файлы на диске и не перезаписывает их своими (_has_media_file).
+
+    force_review=True оставляет все принятые карточки в статусе review вместо
+    approved — источник, которому доверяют не настолько, чтобы пускать его прямо
+    в push, всё равно проходит через человека.
 
     Возвращает статистику: {new: N, review: M, merged: K, ...}
     """
@@ -349,13 +386,17 @@ async def run_ingest_pipeline(
         accepted.append(card)
         stats["new"] += 1
 
+    if on_accepted is not None and accepted:
+        await on_accepted(accepted)
+
     enrich_stats, incomplete_ids = await enrich_and_generate_media(
         accepted, db, cfg, auto_enrich, auto_media
     )
     stats.update(enrich_stats)
 
     for card in accepted:
-        card.status = Status.REVIEW if card.id in incomplete_ids else Status.APPROVED
+        incomplete = card.id in incomplete_ids
+        card.status = Status.REVIEW if (incomplete or force_review) else Status.APPROVED
         db.update_card(card)
         _record(db, "info", "create", card.id, word=card.word)
 
