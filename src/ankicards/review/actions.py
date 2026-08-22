@@ -11,10 +11,14 @@ from __future__ import annotations
 from ..anki.connect import AnkiConnect
 from ..config import Config
 from ..db import Database
-from ..models import Card, Status
+from ..models import POS, Card, Status
 from ..pipeline import _record, delete_card_record, enrich_and_generate_media
 
-EDITABLE_FIELDS = ("word", "translation", "example", "example_translation")
+# pos тут потому, что определить часть речи автоматически удаётся не всегда
+# (ingest bildetema берёт её из артикля, а у бесартиклевых слов — из LLM, который
+# может и не ответить). Без правки такую карточку оставалось только удалить и
+# импортировать заново. Значение проверяется по enum — см. _validated().
+EDITABLE_FIELDS = ("word", "translation", "example", "example_translation", "pos")
 
 
 def _require_cards(card_ids: list[int], db: Database, language: str | None = None) -> list[Card]:
@@ -127,10 +131,26 @@ def resume_cards(card_ids: list[int], db: Database, language: str | None = None)
     return _set_status(card_ids, Status.REVIEW, "review_resume", db, language)
 
 
+def _validated(field: str, value: str) -> str:
+    """Привести значение к тому, что колонка реально принимает.
+
+    Текстовые поля пишутся как есть, но `pos` — это enum: опечатка вроде
+    `adjective` не помешает UPDATE, зато карточка перестанет читаться из БД
+    (Card.model_validate упадёт на неизвестном значении). Ловим на входе.
+    """
+    if field != "pos":
+        return value
+    try:
+        return POS(value.strip().lower()).value
+    except ValueError as e:
+        allowed = ", ".join(p.value for p in POS)
+        raise ValueError(f"Неизвестная часть речи {value!r} (допустимы: {allowed})") from e
+
+
 def edit_card(
     card_id: int, updates: dict[str, str], db: Database, language: str | None = None
 ) -> Card:
-    _require_cards([card_id], db, language)
+    card = _require_cards([card_id], db, language)[0]
     bad_fields = [k for k in updates if k not in EDITABLE_FIELDS]
     if bad_fields:
         raise ValueError(
@@ -140,8 +160,18 @@ def edit_card(
     if not updates:
         raise ValueError("Не указано ни одного поля для изменения")
 
+    updates = {field: _validated(field, value) for field, value in updates.items()}
+
+    # Смена части речи обнуляет формы: они были сгенерированы под прежний POS и
+    # к новому не относятся (склонение существительного у глагола — мусор, а не
+    # данные). Пустое поле честнее неверного, и следующий accept сгенерирует
+    # правильные — enrich_grammar_batch смотрит как раз на card.pos.
+    clear_forms = "pos" in updates and updates["pos"] != card.pos.value
+
     with db.connect() as conn:
         set_clause = ", ".join(f"{k} = ?" for k in updates)
+        if clear_forms:
+            set_clause += ", forms = NULL"
         conn.execute(f"UPDATE cards SET {set_clause} WHERE id = ?", (*updates.values(), card_id))
     _record(db, "info", "review_edit", card_id, **updates)
 

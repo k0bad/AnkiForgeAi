@@ -558,3 +558,87 @@ async def test_accept_without_verified_leaves_no_tag(
     reloaded = db.get_by_id(1)
     assert reloaded is not None
     assert reloaded.tags == []
+
+
+# ───────────────────────── правка части речи ─────────────────────────
+
+
+def _seeded(tmp_path: Path, **overrides: object) -> tuple[Database, Card]:
+    db = Database(tmp_path / "cards.db")
+    fields: dict = {
+        "language": "nb",
+        "word": "glad",
+        "pos": POS.OTHER,
+        "translation": "рад",
+    }
+    fields.update(overrides)
+    card = Card(**fields)
+    db.insert_card(card)
+    return db, card
+
+
+def test_edit_can_fix_a_part_of_speech_the_classifier_got_wrong(tmp_path: Path) -> None:
+    """Без этого неверный POS чинился только удалением карточки и переимпортом."""
+    from ankicards.review import actions
+
+    db, _ = _seeded(tmp_path)
+
+    updated = actions.edit_card(1, {"pos": "adj"}, db)
+
+    assert updated.pos is POS.ADJECTIVE
+    assert db.get_by_id(1).pos is POS.ADJECTIVE  # type: ignore[union-attr]
+
+
+def test_edit_rejects_a_part_of_speech_that_is_not_in_the_enum(tmp_path: Path) -> None:
+    """Опечатка не помешала бы UPDATE, но карточка перестала бы читаться из БД."""
+    from ankicards.review import actions
+
+    db, _ = _seeded(tmp_path)
+
+    with pytest.raises(ValueError, match="Неизвестная часть речи"):
+        actions.edit_card(1, {"pos": "adjective"}, db)
+
+    assert db.get_by_id(1).pos is POS.OTHER  # type: ignore[union-attr]
+
+
+def test_edit_normalises_part_of_speech_case_and_spacing(tmp_path: Path) -> None:
+    from ankicards.review import actions
+
+    db, _ = _seeded(tmp_path)
+
+    assert actions.edit_card(1, {"pos": " ADJ "}, db).pos is POS.ADJECTIVE
+
+
+def test_changing_part_of_speech_drops_forms_generated_for_the_old_one(tmp_path: Path) -> None:
+    """Склонение существительного у прилагательного — мусор, а не данные;
+    пустые формы честнее, следующий accept сгенерирует правильные."""
+    from ankicards.review import actions
+
+    db, _ = _seeded(
+        tmp_path, word="varm", pos=POS.NOUN, forms={"gender": "m", "definite_singular": "varmen"}
+    )
+
+    updated = actions.edit_card(1, {"pos": "adj"}, db)
+
+    assert updated.forms is None
+
+
+def test_editing_text_leaves_forms_alone(tmp_path: Path) -> None:
+    """Обнуление форм привязано к смене POS, а не к любой правке."""
+    from ankicards.review import actions
+
+    db, _ = _seeded(tmp_path, word="hatt", pos=POS.NOUN, forms={"gender": "m"})
+
+    updated = actions.edit_card(1, {"translation": "шляпа"}, db)
+
+    assert updated.forms == {"gender": "m"}
+
+
+def test_repeating_the_same_part_of_speech_keeps_the_forms(tmp_path: Path) -> None:
+    from ankicards.review import actions
+
+    db, _ = _seeded(tmp_path, word="hatt", pos=POS.NOUN, forms={"gender": "m"})
+
+    updated = actions.edit_card(1, {"pos": "noun"}, db)
+
+    assert updated.forms == {"gender": "m"}

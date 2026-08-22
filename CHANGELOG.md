@@ -49,6 +49,14 @@ All notable changes to AnkiForgeAI will be documented in this file.
   review. Re-accepting a card neither duplicates the tag nor rewrites the first date.
 
 ### Changed
+- `ankiforgeai review edit` can now set `pos`. Part of speech is not always derivable —
+  `ingest bildetema` reads it off the article and falls back to an LLM for words that
+  have none, and that call can simply fail — and until now a card that came out with the
+  wrong `pos` could only be fixed by deleting it and importing the topic again. The value
+  is checked against the `POS` enum on the way in: a typo like `adjective` would not have
+  troubled the UPDATE, but the card would have stopped loading from the DB afterwards.
+  Changing `pos` also clears `forms`, since forms generated for the previous part of
+  speech do not describe the new one; the next `accept` regenerates them.
 - `Database.update_card()` now writes the `tags` column. It never did, so any tag added
   after ingest — the `verified` one above included — was silently dropped on the next
   save.
