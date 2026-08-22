@@ -176,6 +176,33 @@ All notable changes to AnkiForgeAI will be documented in this file.
   `DEVELOPER_GUIDE.md` §11 for the one-time migration steps on existing checkouts.
 
 ### Fixed
+- A card that dedupe routes to human review keeps its Bildetema photograph and audio.
+  The download hook ran only for `accepted` cards, so anything sent to review as a
+  possible duplicate lost both — permanently: this hook is the only place that fetches
+  them, and re-running the same topic will not recreate the card, because dedupe now
+  sees the card itself as the duplicate. The person then adjudicated the card looking
+  at an empty frame instead of the photograph Bildetema is imported for. The hook is
+  renamed `on_accepted` → `on_inserted` and now runs for every card that got an id;
+  those cards are also saved after it, which the review branch never did — otherwise
+  the filenames it sets live only in memory, leaving files on disk and empty columns
+  in the DB. Enrichment still skips them: they may yet turn out to be duplicates, and
+  a photo from a CDN costs one request rather than tokens.
+  Surfaced by a bulk import that hit the `claude_cli` rate limit: with LLM
+  adjudication unavailable every ambiguous match fell back to human review, and 301
+  of 694 cards arrived with no media at all.
+- Noun gender comes from Bildetema's own `article` field instead of being guessed.
+  `prompts/grammar_forms.md` told the model `"f" (ei — rare, treat as m if unsure)`,
+  i.e. to round feminines down to masculine on any doubt — and 198 of 1112 Bildetema
+  words carry the `ei/en` marking that says otherwise. The article is now mapped to a
+  gender at import (`en`→m, `ei`/`ei/en`→f, `et`→n; genuinely ambiguous `ei/en/et` and
+  `en/et` are left to the model) and travels into the request as `known_forms`, not
+  merely over the answer: feminine declension differs (`ei jente → jenta`, not
+  `jenten`), so overwriting the gender on top of a masculine paradigm would leave the
+  card self-contradictory. Whatever is already on the card wins over the model's reply.
+  Because a gender alone is not a paradigm, `enrich_grammar_batch` no longer decides by
+  `bool(card.forms)` but by `forms_complete()`, which checks the fields that part of
+  speech actually needs — otherwise such a card would look finished and never get
+  declined.
 - `provider: claude_cli` no longer loses a whole batch of cards to one hiccup. Two
   separate faults, both hit while accepting 170 reviewed Bildetema cards:
   a non-zero exit from `claude -p` was raised as `RuntimeError`, which `_is_transient`

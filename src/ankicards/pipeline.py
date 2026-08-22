@@ -322,16 +322,24 @@ async def run_ingest_pipeline(
     cfg: Config,
     auto_enrich: bool = True,
     auto_media: bool = True,
-    on_accepted: Callable[[list[Card]], Awaitable[None]] | None = None,
+    on_inserted: Callable[[list[Card]], Awaitable[None]] | None = None,
     force_review: bool = False,
 ) -> dict:
     """Прогнать кандидатов через dedupe → enrich → media → save.
 
-    on_accepted вызывается для карточек, прошедших dedupe, сразу после INSERT и
-    до enrichment — то есть в первой точке, где у карточки уже есть id, а значит
+    on_inserted вызывается для всех карточек, получивших id, сразу после INSERT и
+    до enrichment — то есть в первой точке, где у карточки уже есть номер, а значит
     и детерминированные имена медиафайлов (CLAUDE.md принцип 6). Через него
     `ingest bildetema` подкладывает готовое фото и аудио с их CDN: media-стадия
     ниже видит файлы на диске и не перезаписывает их своими (_has_media_file).
+
+    Сюда попадают и те, кого dedupe увёл в review: раньше колбэк звался только для
+    accepted, и карточка, отправленная на человеческую адъюдикацию, оставалась без
+    фото и звука навсегда — их скачивает только эта точка, а второй раз ingest той
+    же темы карточку уже не создаст (dedupe увидит её саму как дубль). Человек в
+    итоге решал судьбу карточки, глядя на пустое место вместо картинки, ради
+    которой в Bildetema и идут. Enrichment на них по-прежнему не тратится: они
+    могут оказаться дублями, а фото с CDN стоит одного запроса, а не токенов.
 
     force_review=True оставляет все принятые карточки в статусе review вместо
     approved — источник, которому доверяют не настолько, чтобы пускать его прямо
@@ -350,6 +358,7 @@ async def run_ingest_pipeline(
     }
 
     accepted: list[Card] = []
+    needs_review: list[Card] = []
     for card in cards:
         decision = check_card(card, db, cfg)
         decision = await judge_review(card, decision, cfg)
@@ -376,6 +385,7 @@ async def run_ingest_pipeline(
                 matches=[m.model_dump() for m in decision.matches],
                 reason=decision.reason,
             )
+            needs_review.append(card)
             stats["review"] += 1
             continue
         # Выделяем id сразу (INSERT, не UPDATE) — enrich_and_generate_media ниже
@@ -386,8 +396,15 @@ async def run_ingest_pipeline(
         accepted.append(card)
         stats["new"] += 1
 
-    if on_accepted is not None and accepted:
-        await on_accepted(accepted)
+    inserted = accepted + needs_review
+    if on_inserted is not None and inserted:
+        await on_inserted(inserted)
+        # Карточки из review-ветки уже вставлены и ниже не сохраняются: цикл в конце
+        # идёт только по accepted. Всё, что колбэк проставил (имена скачанных фото и
+        # аудио), осталось бы жить в объекте и умерло бы вместе с ним — файлы на диске,
+        # колонки в БД пустые.
+        for card in needs_review:
+            db.update_card(card)
 
     enrich_stats, incomplete_ids = await enrich_and_generate_media(
         accepted, db, cfg, auto_enrich, auto_media

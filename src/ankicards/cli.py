@@ -431,7 +431,7 @@ def ingest_bildetema_cmd(
                     db=db,
                     cfg=cfg,
                     auto_enrich=enrich,
-                    on_accepted=_download_media,
+                    on_inserted=_download_media,
                     force_review=True,
                 )
             except Exception as e:

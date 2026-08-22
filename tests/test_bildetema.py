@@ -24,6 +24,7 @@ from ankicards.config import (
     TTSConfig,
 )
 from ankicards.db import Database
+from ankicards.enrich import grammar
 from ankicards.ingest import bildetema
 from ankicards.models import POS, Card, Status
 
@@ -388,7 +389,7 @@ async def test_attach_media_survives_failed_download(
 async def test_pipeline_runs_hook_before_enrichment_and_keeps_cards_in_review(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """on_accepted обязан отработать до media-стадии: она смотрит на файлы на диске,
+    """on_inserted обязан отработать до media-стадии: она смотрит на файлы на диске,
     чтобы не переозвучить уже скачанное аудио."""
     cfg = _config(tmp_path)
     db = Database(tmp_path / "cards.db")
@@ -411,7 +412,7 @@ async def test_pipeline_runs_hook_before_enrichment_and_keeps_cards_in_review(
 
     card = Card(language="nb", word="lue", pos=POS.NOUN, translation="шапка")
     stats = await pipeline.run_ingest_pipeline(
-        [card], db=db, cfg=cfg, auto_enrich=False, on_accepted=_hook, force_review=True
+        [card], db=db, cfg=cfg, auto_enrich=False, on_inserted=_hook, force_review=True
     )
 
     assert order == ["hook"], "edge-tts не должен затирать уже скачанное аудио"
@@ -697,3 +698,93 @@ async def test_accept_keeps_earlier_batches_when_a_later_one_blows_up(
     assert [c.word for c in db.get_by_status(Status.APPROVED)] == ["ord0", "ord1"]
     assert db.get_by_id(1).is_verified()  # type: ignore[union-attr]
     assert not db.get_by_id(3).is_verified()  # type: ignore[union-attr]
+
+
+async def test_hook_also_runs_for_cards_dedupe_sent_to_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Карточка, которую dedupe увёл на человеческую адъюдикацию, тоже получает медиа.
+
+    Точка скачивания фото и аудио с CDN ровно одна — этот колбэк, и повторный ingest
+    той же темы её не спасёт: dedupe увидит уже лежащую в БД карточку как дубль. Без
+    этого человек решает судьбу карточки, глядя на пустое место вместо фотографии.
+    """
+    cfg = _config(tmp_path)
+    db = Database(tmp_path / "cards.db")
+    seen: list[str] = []
+
+    async def _hook(cards: list[Card]) -> None:
+        for card in cards:
+            seen.append(card.word)
+            path = cfg.paths.audio_dir / f"{card.id}_nb.mp3"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"bildetema")
+            card.audio = path.name
+
+    # Первая карточка ложится в БД, вторая почти повторяет её по написанию — на ней
+    # dedupe и срабатывает, отправляя в review вместо accepted.
+    await pipeline.run_ingest_pipeline(
+        [Card(language="nb", word="storesøster", pos=POS.NOUN, translation="старшая сестра")],
+        db=db,
+        cfg=cfg,
+        auto_enrich=False,
+        auto_media=False,
+        force_review=True,
+    )
+    seen.clear()
+
+    monkeypatch.setattr(pipeline, "judge_review", _passthrough_judge)
+    stats = await pipeline.run_ingest_pipeline(
+        [Card(language="nb", word="storesøstera", pos=POS.NOUN, translation="старшая сестра")],
+        db=db,
+        cfg=cfg,
+        auto_enrich=False,
+        auto_media=False,
+        on_inserted=_hook,
+        force_review=True,
+    )
+
+    assert stats["review"] == 1, "иначе тест проверяет не ту ветку — dedupe карточку пропустил"
+    assert seen == ["storesøstera"]
+    # Читаем из БД, а не из объекта: сохранить карточку после колбэка — забота
+    # пайплайна, review-ветка вставила её раньше и сама к ней не возвращается.
+    saved = [c for c in db.get_by_status(Status.REVIEW) if c.word == "storesøstera"]
+    assert saved and saved[0].audio == f"{saved[0].id}_nb.mp3"
+
+
+async def _passthrough_judge(_card: Card, decision: object, _cfg: Config) -> object:
+    """LLM-адъюдикация в тесте не нужна: проверяется ветка, в которую dedupe уже попал."""
+    return decision
+
+
+@pytest.mark.parametrize(
+    ("article", "gender"),
+    [
+        ("en", "m"),
+        ("ei", "f"),
+        ("ei/en", "f"),  # у Bildetema это отдельная пометка, а не «или то, или это»
+        ("et", "n"),
+        ("ei/en/et", None),  # род и правда неоднозначен — пусть решает модель
+        ("en/et", None),
+        (None, None),
+    ],
+)
+def test_gender_comes_from_the_article(article: str | None, gender: str | None) -> None:
+    assert bildetema._gender_of(article) == gender
+
+
+def test_entry_carries_gender_but_not_a_finished_paradigm(database: dict) -> None:
+    """Из артикля берётся только род: склонение Bildetema не хранит, и карточка
+    обязана остаться «неполной», иначе enrich_grammar_batch пройдёт мимо неё."""
+    topic = bildetema.resolve_topic(database, "Klær", "nob")
+    entries = bildetema.build_entries(
+        database, topic, language="nb", target_lang="nob", translation_lang="rus"
+    )
+    by_word = {e.card.word: e.card for e in entries}
+
+    lue = by_word["lue"]  # ei/en → женский
+    assert lue.forms == {"gender": "f"}
+    assert not grammar.forms_complete(lue), "склонение всё ещё надо добрать у модели"
+
+    assert by_word["sko"].forms == {"gender": "m"}  # en
+    assert by_word["støvler"].forms is None  # без артикля — и род неизвестен
