@@ -37,7 +37,7 @@ import httpx
 
 from .._net import http_retry
 from ..config import Config
-from ..llm import call_json, load_prompt
+from ..enrich.pos import classify_pos_batch
 from ..log import get_logger
 from ..media.images import download_image
 from ..models import POS, Card, Level, Status
@@ -53,8 +53,6 @@ SOURCE_PREFIX = "bildetema"
 LANG_BY_PROFILE = {"nb": "nob", "en": "eng", "es": "spa"}
 # config.ui_language → язык перевода на обратной стороне карточки.
 LANG_BY_UI = {"ru": "rus", "en": "eng"}
-
-_POS_BY_VALUE = {p.value: p for p in POS}
 
 
 class BildetemaError(Exception):
@@ -355,40 +353,11 @@ async def classify_missing_pos(entries: list[Entry]) -> None:
     прилагательные (glad, syk), pluralia tantum (foreldre, briller) и
     неисчисляемые (melk, vann). Без разбора всё это ушло бы в POS.OTHER и
     осталось бы без грамматических форм на стадии enrich (INFLECTED_POS).
+
+    Сама логика живёт в enrich.pos: то же самое нужно и на accept, куда карточки
+    приходят после `--no-enrich`, уже без всякой связи с Bildetema.
     """
-    targets = [entry for entry in entries if entry.card.pos is POS.OTHER]
-    if not targets:
-        return
-
-    payload = [
-        {"id": entry.word_id, "word": entry.card.word, "translation": entry.card.translation}
-        for entry in targets
-    ]
-    prompt = load_prompt("pos_classify", words_json=json.dumps(payload, ensure_ascii=False))
-    try:
-        raw = await call_json(prompt, stage="ingest")
-    except Exception as e:
-        # Часть речи — уточнение, а не условие импорта: провайдер прилёг, а слова,
-        # переводы, фото и аудио у нас уже есть. Роняя тут весь заход, мы бы потеряли
-        # и их — вместо этого карточки уходят в review как POS.OTHER, где человек
-        # видит это в списке и правит через `review edit`.
-        logger.warning("bildetema.pos_classify_failed", count=len(targets), error=str(e))
-        return
-    if not isinstance(raw, list):
-        logger.warning("bildetema.pos_classify_bad_shape", got=type(raw).__name__)
-        return
-
-    pos_by_id = {
-        str(item["id"]): str(item.get("pos", "")).lower()
-        for item in raw
-        if isinstance(item, dict) and "id" in item
-    }
-    for entry in targets:
-        pos = _POS_BY_VALUE.get(pos_by_id.get(entry.word_id, ""))
-        if pos is None:
-            logger.warning("bildetema.pos_unresolved", word_id=entry.word_id, word=entry.card.word)
-            continue
-        entry.card.pos = pos
+    await classify_pos_batch([entry.card for entry in entries])
 
 
 # ───────────────────────── медиа ─────────────────────────

@@ -176,6 +176,18 @@ All notable changes to AnkiForgeAI will be documented in this file.
   `DEVELOPER_GUIDE.md` §11 for the one-time migration steps on existing checkouts.
 
 ### Fixed
+- Part of speech is resolved at `review accept`, not only at import. It used to be a
+  detail of the Bildetema importer, so a card brought in with `--no-enrich` stayed
+  `other` forever: accept never looked at it again, and the card silently lost its
+  grammatical forms (`INFLECTED_POS` skips `other`), its image eligibility
+  (`images.only_for_pos`) and its `pos::noun` tag — the one Anki filters on to split a
+  nouns deck from a verbs deck. The logic moved out of `ingest/bildetema.py` into
+  `enrich/pos.py` as a stage of its own and now runs first in
+  `enrich_and_generate_media`, before grammar decides who inflects. Answers are keyed
+  by position rather than card id, because at import time the cards have no id yet.
+  One batched call, and only for the cards whose part of speech is genuinely unknown —
+  roughly one Bildetema word in five, which has no article: plurale tantum (`tenner`,
+  `druer`), mass nouns (`melk`), adjectives (`glad`, `syk`).
 - A card that dedupe routes to human review keeps its Bildetema photograph and audio.
   The download hook ran only for `accepted` cards, so anything sent to review as a
   possible duplicate lost both — permanently: this hook is the only place that fetches

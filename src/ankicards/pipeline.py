@@ -22,6 +22,7 @@ from .db import Database
 from .dedupe import check_card, judge_review
 from .enrich.examples import enrich_example_batch
 from .enrich.grammar import INFLECTED_POS, enrich_grammar_batch
+from .enrich.pos import classify_pos_batch
 from .enrich.pronunciation import enrich_pronunciation_batch
 from .enrich.translation import enrich_translation
 from .log import get_logger
@@ -151,6 +152,15 @@ async def enrich_and_generate_media(
     incomplete_ids: set[int] = set()
 
     if auto_enrich and cards:
+        # Часть речи — первой: по ней грамматика решает, у кого вообще бывают формы
+        # (INFLECTED_POS), картиночная стадия — кому положено фото (images.only_for_pos),
+        # а Anki получает тег pos::noun, которым колода существительных отделяется от
+        # колоды глаголов. Раньше это делал только импортёр Bildetema, поэтому после
+        # `--no-enrich` карточка оставалась POS.OTHER навсегда: accept её не трогал, и
+        # всё перечисленное она теряла молча. Вызов дешёвый — один батч на всю пачку и
+        # только для тех, у кого часть речи и правда неизвестна.
+        await classify_pos_batch(cards)
+
         # Pronunciation — обработана через _run_enrich_stage с per-card ошибками,
         # как grammar/examples: раньше делила try/except с translation ниже, и падение
         # batch-вызова не помечало карточки incomplete — они тихо уходили в APPROVED

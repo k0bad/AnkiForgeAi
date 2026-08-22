@@ -25,6 +25,7 @@ from ankicards.config import (
 )
 from ankicards.db import Database
 from ankicards.enrich import grammar
+from ankicards.enrich import pos as pos_stage
 from ankicards.ingest import bildetema
 from ankicards.models import POS, Card, Status
 
@@ -242,10 +243,10 @@ async def test_classify_missing_pos_only_asks_about_words_without_article(
 
     async def _fake_call_json(prompt: str, **_: object) -> list[dict]:
         asked.append(json.loads(prompt))
-        return [{"id": "V0451", "pos": "noun"}]
+        return [{"id": 0, "pos": "noun"}]
 
-    monkeypatch.setattr(bildetema, "load_prompt", lambda _name, **kw: kw["words_json"])
-    monkeypatch.setattr(bildetema, "call_json", _fake_call_json)
+    monkeypatch.setattr(pos_stage, "load_prompt", lambda _name, **kw: kw["words_json"])
+    monkeypatch.setattr(pos_stage, "call_json", _fake_call_json)
 
     await bildetema.classify_missing_pos(entries)
 
@@ -260,10 +261,10 @@ async def test_classify_missing_pos_leaves_card_alone_when_llm_skips_it(
     entries = _entries(database)
 
     async def _fake_call_json(prompt: str, **_: object) -> list[dict]:
-        return [{"id": "V0451", "pos": "нечто"}]
+        return [{"id": 0, "pos": "нечто"}]
 
-    monkeypatch.setattr(bildetema, "load_prompt", lambda _name, **kw: kw["words_json"])
-    monkeypatch.setattr(bildetema, "call_json", _fake_call_json)
+    monkeypatch.setattr(pos_stage, "load_prompt", lambda _name, **kw: kw["words_json"])
+    monkeypatch.setattr(pos_stage, "call_json", _fake_call_json)
 
     await bildetema.classify_missing_pos(entries)
 
@@ -455,8 +456,8 @@ async def test_classify_missing_pos_survives_llm_outage(
     async def _boom(prompt: str, **_: object) -> list[dict]:
         raise RuntimeError("claude CLI завершился с кодом 1")
 
-    monkeypatch.setattr(bildetema, "load_prompt", lambda _name, **kw: kw["words_json"])
-    monkeypatch.setattr(bildetema, "call_json", _boom)
+    monkeypatch.setattr(pos_stage, "load_prompt", lambda _name, **kw: kw["words_json"])
+    monkeypatch.setattr(pos_stage, "call_json", _boom)
 
     await bildetema.classify_missing_pos(entries)
 
@@ -788,3 +789,32 @@ def test_entry_carries_gender_but_not_a_finished_paradigm(database: dict) -> Non
 
     assert by_word["sko"].forms == {"gender": "m"}  # en
     assert by_word["støvler"].forms is None  # без артикля — и род неизвестен
+
+
+async def test_accept_resolves_a_part_of_speech_the_import_left_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """После `--no-enrich` карточка приходит POS.OTHER, и добрать часть речи больше
+    негде: импортёр её уже не увидит. Без этого она молча остаётся и без граммати-
+    ческих форм (INFLECTED_POS), и без тега pos::noun, которым в Anki отделяют
+    колоду существительных от колоды глаголов.
+    """
+    cfg = _config(tmp_path)
+    # Остальные стадии выключены намеренно: проверяется только определение части
+    # речи, а с ними тест уходил бы в живой LLM на минуту с лишним.
+    cfg.enrich.pronunciation = cfg.enrich.grammar = cfg.enrich.examples = False
+    db = Database(tmp_path / "cards.db")
+
+    async def _classified(prompt: str, **_: object) -> list[dict]:
+        return [{"id": 0, "pos": "noun"}]
+
+    monkeypatch.setattr(pos_stage, "load_prompt", lambda _name, **kw: kw["words_json"])
+    monkeypatch.setattr(pos_stage, "call_json", _classified)
+
+    card = Card(language="nb", word="tenner", pos=POS.OTHER, translation="зубы")
+    db.insert_card(card)
+
+    await pipeline.enrich_and_generate_media([card], db, cfg, auto_enrich=True, auto_media=False)
+
+    assert card.pos is POS.NOUN
+    assert "pos::noun" in card.auto_tags()
