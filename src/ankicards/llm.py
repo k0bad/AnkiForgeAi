@@ -29,6 +29,18 @@ from .log import get_logger
 logger = get_logger(__name__)
 
 
+class ClaudeCliError(Exception):
+    """`claude -p` завершился неуспешно (ненулевой код, битый конверт, is_error).
+
+    Отдельный класс, а не RuntimeError, именно ради ретраев: _is_transient
+    исключает RuntimeError как «повтор не поможет», и это верно для «нет ключа»
+    или «CLI не найден в PATH», но не для этого случая. На практике CLI отдаёт
+    код 1 с пустым stderr, когда сервис перегружен или упёрся в rate-limit —
+    ровно тот транзиентный сбой, который лечится повтором. Раньше такой выход
+    мгновенно ронял всю пачку карточек в enrich-стадии (см. _run_enrich_stage:
+    провал одного batch-вызова помечает incomplete все карточки пачки)."""
+
+
 class EmptyCompletionError(Exception):
     """Провайдер вернул пустой completion (content=None/"" при HTTP 200).
 
@@ -251,18 +263,22 @@ async def _call_claude_cli(prompt: str, cfg: Config, model: str) -> str:
         raise  # транзиентно для _is_transient — ретраится
 
     if proc.returncode != 0:
-        raise RuntimeError(
+        # stdout, а не только stderr: при --output-format json CLI пишет описание
+        # ошибки в конверт на stdout и часто оставляет stderr пустым. Сообщение
+        # «завершился с кодом 1: » без единого слова причины — это как раз тот случай.
+        raise ClaudeCliError(
             f"claude CLI завершился с кодом {proc.returncode}: "
-            f"{stderr.decode(errors='replace')[:500]}"
+            f"stderr={stderr.decode(errors='replace')[:300]!r} "
+            f"stdout={stdout.decode(errors='replace')[:300]!r}"
         )
 
     try:
         envelope: dict[str, Any] = json.loads(stdout.decode())
     except json.JSONDecodeError as e:
-        raise RuntimeError(f"claude CLI вернул невалидный JSON-конверт: {stdout[:500]!r}") from e
+        raise ClaudeCliError(f"claude CLI вернул невалидный JSON-конверт: {stdout[:500]!r}") from e
 
     if envelope.get("is_error"):
-        raise RuntimeError(f"claude CLI ошибка: {str(envelope.get('result', ''))[:500]}")
+        raise ClaudeCliError(f"claude CLI ошибка: {str(envelope.get('result', ''))[:500]}")
 
     text = str(envelope.get("result") or "").strip()
     if not text:

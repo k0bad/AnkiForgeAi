@@ -176,6 +176,23 @@ All notable changes to AnkiForgeAI will be documented in this file.
   `DEVELOPER_GUIDE.md` §11 for the one-time migration steps on existing checkouts.
 
 ### Fixed
+- `provider: claude_cli` no longer loses a whole batch of cards to one hiccup. Two
+  separate faults, both hit while accepting 170 reviewed Bildetema cards:
+  a non-zero exit from `claude -p` was raised as `RuntimeError`, which `_is_transient`
+  deliberately excludes from retries — right for "no API key" or "CLI not in PATH",
+  wrong for the exit code 1 with empty output the CLI returns when the service is
+  busy. One such exit marked every card in the batch `enrich_incomplete` and sent them
+  back to `review` without forms. Non-zero exits, unparsable envelopes, and
+  `is_error` responses now raise `ClaudeCliError`, which retries; a missing binary
+  stays a permanent `RuntimeError`. The error message also carries stdout, not only
+  stderr: with `--output-format json` the CLI puts the reason in the envelope on
+  stdout, which is why the failure logged as `завершился с кодом 1: ` with nothing
+  after the colon.
+  And `llm.claude_cli_timeout_seconds` went from 120 to 600. Each headless call boots
+  the CLI with its full system prompt before generating, and the batch enrich stages
+  ask for forms or examples covering dozens of words at once — a measured call over 25
+  nouns took 130 s, of which 107 s was time-to-first-token. At 120 s that call did not
+  fail fast, it burned three two-minute attempts and then dropped the batch anyway.
 - Forms-grid labels (gender/number/tense) in the nb/de/es language profiles, and noun
   gender (masculine/feminine/neuter) rendered by `_GENDER_MAP_NB`/`_GENDER_MAP_DE` in
   `notetype.py`, were hardcoded in Russian instead of the target language — leaking

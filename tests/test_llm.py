@@ -24,7 +24,7 @@ from ankicards.config import (
     TagsConfig,
     TTSConfig,
 )
-from ankicards.llm import EmptyCompletionError, _parse_json
+from ankicards.llm import ClaudeCliError, EmptyCompletionError, _parse_json
 
 
 def test_parse_json_plain_array() -> None:
@@ -202,14 +202,20 @@ async def test_call_claude_cli_raises_on_is_error(
 
     monkeypatch.setattr(llm.asyncio, "create_subprocess_exec", fake_exec)
 
-    with pytest.raises(RuntimeError, match="что-то сломалось"):
+    with pytest.raises(ClaudeCliError, match="что-то сломалось"):
         await llm._call_claude_cli("промпт", cfg, "sonnet")
 
 
-async def test_call_claude_cli_nonzero_exit_raises_runtime_error(
+async def test_call_claude_cli_nonzero_exit_is_retryable_not_runtime_error(
     tmp_path,  # type: ignore[no-untyped-def]
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Ненулевой код возврата — транзиентный сбой, а не «повтор не поможет».
+
+    RuntimeError исключён из ретраев (_is_transient), и раньше выход CLI с кодом 1
+    попадал именно туда: один такой выход мгновенно ронял всю пачку карточек
+    обратно в review, хотя следующая попытка сработала бы.
+    """
     cfg = _make_config(tmp_path)
     fake_proc = _FakeProcess(b"", stderr=b"auth error", returncode=1)
 
@@ -218,8 +224,54 @@ async def test_call_claude_cli_nonzero_exit_raises_runtime_error(
 
     monkeypatch.setattr(llm.asyncio, "create_subprocess_exec", fake_exec)
 
-    with pytest.raises(RuntimeError, match="завершился с кодом 1"):
+    with pytest.raises(ClaudeCliError, match="завершился с кодом 1"):
         await llm._call_claude_cli("промпт", cfg, "sonnet")
+
+    assert not isinstance(ClaudeCliError(), RuntimeError)
+    assert llm._is_transient(ClaudeCliError())
+
+
+async def test_call_claude_cli_nonzero_exit_reports_stdout_too(
+    tmp_path,  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """При --output-format json причина ошибки уходит в конверт на stdout, а stderr
+    остаётся пустым. Сообщение «завершился с кодом 1: » без единого слова причины
+    ничего не давало для диагностики — теперь в него попадают оба потока."""
+    cfg = _make_config(tmp_path)
+    fake_proc = _FakeProcess(b'{"is_error":true,"result":"usage limit reached"}', returncode=1)
+
+    async def fake_exec(*args: object, **kwargs: object) -> _FakeProcess:
+        return fake_proc
+
+    monkeypatch.setattr(llm.asyncio, "create_subprocess_exec", fake_exec)
+
+    with pytest.raises(ClaudeCliError, match="usage limit reached"):
+        await llm._call_claude_cli("промпт", cfg, "sonnet")
+
+
+async def test_call_claude_cli_retries_a_failed_exit_and_succeeds(
+    tmp_path,  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Полный путь через @_llm_retry: сорвавшийся вызов повторяется и второй
+    заход отдаёт результат, вместо того чтобы обнулить enrichment всей пачки."""
+    cfg = _make_config(tmp_path)
+    responses = [
+        _FakeProcess(b"", returncode=1),
+        _FakeProcess(_envelope(is_error=False, result="со второй попытки")),
+    ]
+    calls = {"n": 0}
+
+    async def fake_exec(*args: object, **kwargs: object) -> _FakeProcess:
+        proc = responses[calls["n"]]
+        calls["n"] += 1
+        return proc
+
+    monkeypatch.setattr(llm.asyncio, "create_subprocess_exec", fake_exec)
+
+    assert await llm._call_claude_cli("промпт", cfg, "sonnet") == "со второй попытки"
+    assert calls["n"] == 2
 
 
 async def test_call_claude_cli_missing_binary_raises_runtime_error(

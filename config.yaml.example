@@ -69,7 +69,10 @@ llm:
   base_url: https://openrouter.ai/api/v1
   max_tokens: 4096
   temperature: 0.3               # ниже = стабильнее для словарных задач
-  claude_cli_timeout_seconds: 120  # таймаут `claude -p` (только provider: claude_cli)
+  # Таймаут `claude -p` (только provider: claude_cli). Щедрый не просто так:
+  # batch-стадии enrichment просят формы/примеры сразу на десятки слов, и такой
+  # вызов легко идёт больше пяти минут
+  claude_cli_timeout_seconds: 600
   # Промпты лежат в prompts/, перезагружаются при каждом вызове
   # (удобно итерировать без рестарта)
 

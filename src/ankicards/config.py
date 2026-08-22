@@ -94,7 +94,12 @@ class LLMConfig(BaseModel):
     temperature: float = 0.3
     # Таймаут headless-вызова `claude -p` (только provider: claude_cli) — SDK-провайдеры
     # (anthropic/openrouter) таймаутятся сами, а subprocess CLI по умолчанию не ограничен.
-    claude_cli_timeout_seconds: int = 120
+    # 600, а не 120: каждый такой вызов заново поднимает CLI с полным системным
+    # промптом, а batch-стадии enrichment просят у модели формы/примеры сразу на
+    # десятки слов — замеренный вызов на 25 существительных шёл больше пяти минут.
+    # На 120 с он не отваливался «быстро и понятно», а уходил в три ретрая по две
+    # минуты и в итоге ронял всю пачку карточек обратно в review.
+    claude_cli_timeout_seconds: int = 600
 
 
 class TTSConfig(BaseModel):
