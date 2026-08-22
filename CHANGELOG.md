@@ -193,6 +193,15 @@ All notable changes to AnkiForgeAI will be documented in this file.
   ask for forms or examples covering dozens of words at once — a measured call over 25
   nouns took 130 s, of which 107 s was time-to-first-token. At 120 s that call did not
   fail fast, it burned three two-minute attempts and then dropped the batch anyway.
+- The grammar enrich stage no longer regenerates forms a card already has. It was the
+  only one of the three batch stages without that filter — `enrich_pronunciation_batch`
+  and `enrich_example_batch` both ask only about what is missing. On a re-accept (a card
+  bounced back to `review` because a different stage failed) it meant re-deriving every
+  paradigm in the batch: minutes of extra generation, and one more chance for a
+  transient failure to take the whole batch down with it. Accepting the 170 imported
+  Bildetema cards needed forms for 25 of them and would have asked for 139. A card whose
+  forms genuinely must be recomputed has them cleared explicitly — see `edit_card` on a
+  part-of-speech change.
 - Forms-grid labels (gender/number/tense) in the nb/de/es language profiles, and noun
   gender (masculine/feminine/neuter) rendered by `_GENDER_MAP_NB`/`_GENDER_MAP_DE` in
   `notetype.py`, were hardcoded in Russian instead of the target language — leaking

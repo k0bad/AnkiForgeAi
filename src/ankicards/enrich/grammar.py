@@ -29,7 +29,14 @@ async def enrich_grammar(card: Card) -> Card:
 
 async def enrich_grammar_batch(cards: list[Card]) -> list[Card]:
     """Батч-обработка для экономии токенов (один LLM-вызов на N карточек)."""
-    targets = [c for c in cards if c.pos in INFLECTED_POS]
+    # not c.forms — как в enrich_pronunciation_batch и enrich_example_batch: спрашиваем
+    # только то, чего нет. Эта стадия одна из трёх фильтра не имела и переспрашивала
+    # формы для всех склоняемых карточек пачки. На повторном accept (карточка вернулась
+    # в review из-за сбоя другой стадии) это означало заново сгенерировать сотню уже
+    # готовых парадигм — лишние минуты и лишний шанс словить транзиентный сбой,
+    # который снова уронит всю пачку. Карточке, которой формы нужно пересчитать,
+    # их обнуляют явно — см. review/actions.py::edit_card при смене pos.
+    targets = [c for c in cards if c.pos in INFLECTED_POS and not c.forms]
     if not targets:
         return cards
 
