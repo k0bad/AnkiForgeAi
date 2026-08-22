@@ -175,6 +175,16 @@ All notable changes to AnkiForgeAI will be documented in this file.
   `cp config.yaml.example config.yaml` (also done automatically by `ankiforgeai setup`). See
   `DEVELOPER_GUIDE.md` §11 for the one-time migration steps on existing checkouts.
 
+### Added
+- `ankiforgeai review html --status <what>` — re-read cards that are already decided.
+  The page only ever showed `review`/`pending`, which is right for its main job, but
+  left no way to look back over accepted cards: the only route was `review resume`,
+  which changes their status just to read them. `open` (review+pending) stays the
+  default; `approved`, `pushed`, `skipped`, `suspended`, individual statuses and `all`
+  are also accepted, and nothing in the DB is touched. Worth having — a typo
+  (`холодый`) was found in a card that had already passed a manual pass and carried a
+  `verified::` tag.
+
 ### Fixed
 - `Database.update_card` now writes the `pos` column. It never did, so a part of
   speech worked out by enrichment lived only in the object and died with it — the

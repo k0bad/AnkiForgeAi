@@ -23,6 +23,8 @@ ankiforgeai ingest bildetema "Klær"   # импорт темы картинно�
                                       # всегда встают в review, не в approved
 ankiforgeai review
 ankiforgeai review html     # страница ревью со всеми фото и аудио одним файлом
+ankiforgeai review html --status approved   # перечитать уже принятое, статус не меняя
+                            # (open — дефолт: review+pending; ещё pushed/skipped/suspended/all)
 ankiforgeai review accept --verified <id>...   # + тег verified::<дата>, «проверил лично»;
                             # флаг, а не дефолт — accept зовут и скрипты. Интерактивный
                             # `review` и страница `review html` ставят его сами

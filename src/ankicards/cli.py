@@ -308,6 +308,19 @@ def ingest_topic_cmd(
         _print_level_totals(level_totals)
 
 
+# --status у `review html`. "open" — то, что ждёт решения; остальные значения дают
+# перечитать уже решённое, ничего в БД не меняя.
+_REVIEW_HTML_STATUSES: dict[str, tuple[Status, ...]] = {
+    "open": (Status.REVIEW, Status.PENDING),
+    "review": (Status.REVIEW,),
+    "pending": (Status.PENDING,),
+    "approved": (Status.APPROVED,),
+    "pushed": (Status.PUSHED,),
+    "skipped": (Status.SKIPPED,),
+    "suspended": (Status.SUSPENDED,),
+    "all": tuple(Status),
+}
+
 _REVIEW_OUT_OPT = typer.Option(
     None, "--out", "-o", help="Куда положить файл (по умолчанию data/review/review-<язык>.html)"
 )
@@ -509,6 +522,11 @@ def review_html_cmd(
     topic: str | None = typer.Option(
         None, help="Только карточки, у которых topic содержит эту строку (напр. klær)"
     ),
+    status: str = typer.Option(
+        "open",
+        "--status",
+        help="Какие карточки брать: open (review+pending, по умолчанию), approved, pushed, all",
+    ),
     include_audio: bool = typer.Option(
         True, "--audio/--no-audio", help="Вшивать mp3 в страницу (крупнее файл, но слышно диктора)"
     ),
@@ -525,9 +543,17 @@ def review_html_cmd(
     cfg = _cfg(language)
     db = _open_db(cfg)
 
-    cards = db.get_by_status(Status.REVIEW, cfg.language) + db.get_by_status(
-        Status.PENDING, cfg.language
-    )
+    # Уже принятые карточки страница по умолчанию не показывает — она про то, что
+    # ждёт решения. Но перечитать approved иногда нужно (в одной такой нашлась
+    # опечатка, пережившая ручную проверку), а гонять ради этого 170 карточек через
+    # `review resume` значит менять им статус только чтобы посмотреть.
+    wanted = _REVIEW_HTML_STATUSES.get(status.strip().lower())
+    if wanted is None:
+        allowed = ", ".join(_REVIEW_HTML_STATUSES)
+        console.print(f"[red]✗[/] Неизвестный --status {status!r} (допустимы: {allowed})")
+        raise typer.Exit(code=1)
+
+    cards = [card for st in wanted for card in db.get_by_status(st, cfg.language)]
     if topic:
         needle = topic.casefold()
         cards = [c for c in cards if c.topic and needle in c.topic.casefold()]
@@ -541,6 +567,9 @@ def review_html_cmd(
     subtitle = (
         f"{len(cards)} карточек ждут решения. Отметь неподходящие — внизу появятся "
         "команды для терминала."
+        if status.strip().lower() == "open"
+        else f"{len(cards)} карточек со статусом «{status}» — перечитать уже решённое. "
+        "Чтобы исправить: `review resume <id>`, затем `review edit` и `review accept --verified`."
     )
     markup = html_report.build_report(
         cards,
