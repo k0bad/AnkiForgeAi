@@ -226,13 +226,19 @@ class Database:
             conn.execute(
                 """UPDATE cards SET
                     pronunciation = ?, translation = ?, example = ?, example_translation = ?,
-                    forms = ?, image = ?, audio = ?, tags = ?, status = ?
+                    pos = ?, forms = ?, image = ?, audio = ?, tags = ?, status = ?
                    WHERE id = ?""",
                 (
                     card.pronunciation,
                     card.translation,
                     card.example,
                     card.example_translation,
+                    # pos — потому что его меняет не только человек через `review edit`
+                    # (у того свой UPDATE), но и enrich.pos на accept. Без этой колонки
+                    # разобранная часть речи жила только в объекте и умирала вместе с
+                    # ним: карточка оставалась `other`, а с ней теряла и грамматические
+                    # формы, и тег pos::noun, по которому в Anki режут колоды.
+                    card.pos.value,
                     json.dumps(card.forms) if card.forms else None,
                     card.image,
                     card.audio,

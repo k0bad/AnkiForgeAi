@@ -176,6 +176,12 @@ All notable changes to AnkiForgeAI will be documented in this file.
   `DEVELOPER_GUIDE.md` §11 for the one-time migration steps on existing checkouts.
 
 ### Fixed
+- `Database.update_card` now writes the `pos` column. It never did, so a part of
+  speech worked out by enrichment lived only in the object and died with it — the
+  card stayed `other` in the DB and went on losing its grammatical forms and its
+  `pos::noun` tag. Manual `review edit` was unaffected: it builds its own UPDATE.
+  Caught by running the new classification stage over 135 real cards, which reported
+  135 resolved and left the database byte-for-byte unchanged.
 - Part of speech is resolved at `review accept`, not only at import. It used to be a
   detail of the Bildetema importer, so a card brought in with `--no-enrich` stayed
   `other` forever: accept never looked at it again, and the card silently lost its

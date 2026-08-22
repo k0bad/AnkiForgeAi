@@ -815,6 +815,13 @@ async def test_accept_resolves_a_part_of_speech_the_import_left_open(
     db.insert_card(card)
 
     await pipeline.enrich_and_generate_media([card], db, cfg, auto_enrich=True, auto_media=False)
+    # Ровно то, что делают оба вызывающих места — run_ingest_pipeline и
+    # review.actions.accept_cards: обогащение мутирует объект, сохраняет вызывающий.
+    db.update_card(card)
 
-    assert card.pos is POS.NOUN
-    assert "pos::noun" in card.auto_tags()
+    # Читаем из БД, а не из объекта: определить часть речи мало, её надо ещё
+    # сохранить, а UPDATE в update_card эту колонку не трогал вовсе.
+    saved = db.get_by_id(card.id)
+    assert saved is not None
+    assert saved.pos is POS.NOUN
+    assert "pos::noun" in saved.auto_tags()
