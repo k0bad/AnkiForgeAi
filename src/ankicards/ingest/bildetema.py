@@ -236,6 +236,24 @@ def _article_of(entry: dict) -> str | None:
     return None
 
 
+# Артикль Bildetema → род существительного. Это данные словаря, а не догадка:
+# промпт grammar_forms велит модели «"f" (ei — rare, treat as m if unsure)», то есть
+# записывать женский род в мужской при малейшем сомнении, а таких слов у Bildetema
+# 198 из 1112. Раз источник род знает, спрашивать его у LLM незачем.
+# Составные вроде "ei/en/et" сюда намеренно не попадают: там род и правда неоднозначен,
+# пусть решает модель.
+_GENDER_BY_ARTICLE = {
+    "en": "m",
+    "ei": "f",
+    "ei/en": "f",  # женский, допускающий и мужское склонение — у Bildetema это отдельная пометка
+    "et": "n",
+}
+
+
+def _gender_of(article: str | None) -> str | None:
+    return _GENDER_BY_ARTICLE.get((article or "").strip().lower())
+
+
 def _media_of(entry: dict) -> Media:
     images = tuple(img["src"] for img in entry.get("images") or [] if img.get("src"))
     audio = next((a["url"] for a in entry.get("audioFiles") or [] if a.get("url")), None)
@@ -304,6 +322,7 @@ def build_entries(
             continue
 
         article = _article_of(entry)
+        gender = _gender_of(article)
         entries.append(
             Entry(
                 word_id=word_id,
@@ -313,6 +332,9 @@ def build_entries(
                     translation=translation,
                     image_query=_label_of(glosses.get(word_id, {})) or None,
                     pos=POS.NOUN if article else POS.OTHER,
+                    # Только род: остальную парадигму досыпает enrich_grammar_batch,
+                    # для которого неполные forms — всё ещё повод сходить к LLM.
+                    forms={"gender": gender} if gender else None,
                     level=level,
                     topic=_slug_of(paths.get(word_id, topic.path)),
                     source=f"{SOURCE_PREFIX}:{word_id}",
