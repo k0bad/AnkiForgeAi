@@ -289,21 +289,74 @@ async def _call_claude_cli(prompt: str, cfg: Config, model: str) -> str:
 # ───────────── JSON parsing ─────────────
 
 
-def _parse_json(text: str) -> Any:
-    """Распарсить JSON, отрезав markdown code fences если есть."""
+def _strip_fences(text: str) -> str:
+    """Вынуть содержимое markdown-блока, если модель обернула им ответ.
+
+    Закрывающая ``` не обязана стоять в самом конце: за блоком модель часто
+    дописывает пояснение («Примечания по нетривиальным словам: ...»). Раньше
+    отрезался только хвостовой ```, а оставшийся в середине текста делал
+    невалидным весь ответ целиком.
+    """
     stripped = text.strip()
-    if stripped.startswith("```"):
-        first_newline = stripped.find("\n")
-        if first_newline != -1:
-            stripped = stripped[first_newline + 1 :]
-        if stripped.endswith("```"):
-            stripped = stripped[:-3]
-        stripped = stripped.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    first_newline = stripped.find("\n")
+    if first_newline == -1:
+        return stripped
+    body = stripped[first_newline + 1 :]
+    closing = body.rfind("```")
+    if closing != -1:
+        body = body[:closing]
+    return body.strip()
+
+
+def _decode_values(text: str) -> list[object]:
+    """Собрать все JSON-значения, встречающиеся в тексте, пропуская прозу между ними.
+
+    Модель просят вернуть один массив, но она нередко разбивает ответ на
+    несколько блоков — по десятку слов в каждом, с комментарием между ними.
+    Для json.loads это «Extra data», и такой ответ раньше ронял всю пачку
+    карточек: JSONDecodeError — подкласс ValueError, а ValueError намеренно
+    исключён из ретраев (_is_transient), так что повтора не было тоже.
+
+    Значения склеиваются, а не берётся первое: иначе из ответа, разбитого на
+    два блока, молча пропала бы вторая половина слов. Если часть всё же не
+    дочиталась, стадия это переживёт — карточки без нужного поля пометятся
+    incomplete по одной (см. pipeline._run_enrich_stage).
+    """
+    decoder = json.JSONDecoder()
+    values: list[object] = []
+    idx = 0
+    while idx < len(text):
+        starts = [i for i in (text.find("[", idx), text.find("{", idx)) if i != -1]
+        if not starts:
+            break
+        start = min(starts)
+        try:
+            value, idx = decoder.raw_decode(text, start)
+        except json.JSONDecodeError:
+            # Не JSON, а скобка внутри прозы — markdown-ссылка, пример в тексте.
+            idx = start + 1
+            continue
+        values.append(value)
+    return values
+
+
+def _parse_json(text: str) -> Any:
+    """Распарсить JSON, отрезав markdown code fences и прозу вокруг."""
+    stripped = _strip_fences(text)
     try:
         return json.loads(stripped)
     except json.JSONDecodeError as e:
-        start = stripped.find("[")
-        end = stripped.rfind("]")
-        if start != -1 and end != -1 and end > start:
-            return json.loads(stripped[start : end + 1])
-        raise ValueError(f"LLM вернул невалидный JSON: {text[:500]!r}") from e
+        first_error = e
+
+    values = _decode_values(stripped)
+    if len(values) == 1:
+        return values[0]
+    if values:
+        merged: list[Any] = []
+        for value in values:
+            merged.extend(value) if isinstance(value, list) else merged.append(value)
+        return merged
+
+    raise ValueError(f"LLM вернул невалидный JSON: {text[:500]!r}") from first_error

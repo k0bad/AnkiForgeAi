@@ -303,3 +303,47 @@ async def test_call_claude_cli_empty_result_raises_empty_completion_error(
 
     with pytest.raises(EmptyCompletionError):
         await llm._call_claude_cli("промпт", cfg, "sonnet")
+
+
+def test_parse_json_fence_followed_by_prose() -> None:
+    """Реальный ответ claude_cli: блок с JSON, а сразу за ним разбор сложных слов.
+
+    Закрывающая ``` оказывалась в середине текста, и невалидным считался весь
+    ответ — падала вся пачка карточек разом, а не одна.
+    """
+    text = (
+        "```json\n"
+        '[{"id": 51, "pronunciation": "хьуле"}]\n'
+        "```\n\n"
+        "Примечания по нетривиальным словам:\n\n"
+        "- **kjole** — `kj` = /ç/, передаётся как `хь`."
+    )
+    assert _parse_json(text) == [{"id": 51, "pronunciation": "хьуле"}]
+
+
+def test_parse_json_merges_an_answer_split_into_several_blocks() -> None:
+    """Ответ, разбитый на два блока с комментарием посередине, склеивается.
+
+    json.loads видит здесь «Extra data» и падает; взять только первый блок
+    значило бы молча потерять половину слов пачки.
+    """
+    text = (
+        '```json\n[{"id": 1}, {"id": 2}]\n```\n\nДальше числительные:\n\n```json\n[{"id": 3}]\n```'
+    )
+    assert _parse_json(text) == [{"id": 1}, {"id": 2}, {"id": 3}]
+
+
+def test_parse_json_reads_objects_written_one_per_line() -> None:
+    """JSONL вместо массива — для json.loads это тоже «Extra data»."""
+    assert _parse_json('{"id": 1}\n{"id": 2}') == [{"id": 1}, {"id": 2}]
+
+
+def test_parse_json_ignores_brackets_that_are_not_json() -> None:
+    """Скобка из прозы (markdown-ссылка) не должна попасть в результат."""
+    text = 'См. [документацию](http://example.com):\n[{"id": 1}]'
+    assert _parse_json(text) == [{"id": 1}]
+
+
+def test_parse_json_keeps_a_single_object_an_object() -> None:
+    """Одиночный объект не заворачивается в список: dedupe.judge_review ждёт dict."""
+    assert _parse_json('Вот вердикт:\n{"duplicate": true}') == {"duplicate": True}

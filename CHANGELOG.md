@@ -193,6 +193,16 @@ All notable changes to AnkiForgeAI will be documented in this file.
   ask for forms or examples covering dozens of words at once — a measured call over 25
   nouns took 130 s, of which 107 s was time-to-first-token. At 120 s that call did not
   fail fast, it burned three two-minute attempts and then dropped the batch anyway.
+- `_parse_json` survives an answer the model wrote as prose plus JSON rather than
+  JSON alone. Two shapes, both seen while accepting the imported Bildetema cards:
+  a fenced block followed by commentary (the closing ``` ended up mid-text, so the
+  whole answer was invalid), and an answer split across several fenced blocks with
+  notes between them (`json.loads` calls that "Extra data"). 45 cards lost their
+  transcription to it — and silently got no retry either, because `JSONDecodeError`
+  subclasses `ValueError`, which `_is_transient` excludes on the grounds that a
+  malformed answer will not fix itself. Fences are now cut at the closing marker
+  wherever it is, and every JSON value in the text is collected and merged, so an
+  answer split in two no longer loses the second half.
 - The grammar enrich stage no longer regenerates forms a card already has. It was the
   only one of the three batch stages without that filter — `enrich_pronunciation_batch`
   and `enrich_example_batch` both ask only about what is missing. On a re-accept (a card
