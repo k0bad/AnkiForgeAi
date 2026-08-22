@@ -366,7 +366,11 @@ button {{ font: inherit; cursor: pointer; }}
   margin: -4px 0 0; font-family: var(--mono); font-size: 12.5px; color: var(--muted);
 }}
 .translation {{ margin: 0; font-size: 15px; }}
-.audio {{ width: 100%; height: 32px; }}
+/* Высоту не задаём: нативный плеер Chrome ровно 54px, а его кнопки живут в
+   shadow DOM и не масштабируются — принудительные 32px просто обрезали их, и
+   по «play» становилось не попасть. Звук при этом исправно играл из кода,
+   поэтому со стороны это выглядело как пропавшее аудио, а не как вёрстка. */
+.audio {{ width: 100%; }}
 .forms {{
   display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 2px 0 0;
   padding-top: 10px; border-top: 1px solid var(--edge);

@@ -186,6 +186,12 @@ All notable changes to AnkiForgeAI will be documented in this file.
   `verified::` tag.
 
 ### Fixed
+- The audio player on the review page can be clicked again. Its CSS pinned
+  `height: 32px`, but Chrome's native control is 54px and its buttons live in a shadow
+  DOM that does not scale — the play button was simply clipped away. The sound itself
+  was fine the whole time (`play()` from the console resolved and reported a duration),
+  so from the outside this looked like missing audio rather than layout. The height is
+  no longer constrained, and a test refuses any `.audio` height below the native one.
 - `Database.update_card` now writes the `pos` column. It never did, so a part of
   speech worked out by enrichment lived only in the object and died with it — the
   card stayed `other` in the DB and went on losing its grammatical forms and its
