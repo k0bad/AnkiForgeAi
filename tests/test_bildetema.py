@@ -642,3 +642,58 @@ def test_repeating_the_same_part_of_speech_keeps_the_forms(tmp_path: Path) -> No
     updated = actions.edit_card(1, {"pos": "noun"}, db)
 
     assert updated.forms == {"gender": "m"}
+
+
+async def test_accept_enriches_in_batches_instead_of_one_huge_llm_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`review html` собирает accept сразу на весь просмотренный список, а enrich-стадия
+    шлёт один вызов на всё переданное — без разбивки формы теряла бы вся партия."""
+    from ankicards.review import actions
+
+    cfg = _config(tmp_path)
+    db = Database(tmp_path / "cards.db")
+    for n in range(7):
+        db.insert_card(Card(language="nb", word=f"ord{n}", pos=POS.NOUN, translation=f"с{n}"))
+    sizes: list[int] = []
+
+    async def _spy(cards, db_, cfg_, **kw):  # type: ignore[no-untyped-def]
+        sizes.append(len(cards))
+        return {}, set()
+
+    monkeypatch.setattr(actions, "enrich_and_generate_media", _spy)
+
+    results = await actions.accept_cards(list(range(1, 8)), db, cfg, batch_size=3)
+
+    assert sizes == [3, 3, 1]
+    assert len(results) == 7
+    assert all(status == Status.APPROVED.value for status in results.values())
+
+
+async def test_accept_keeps_earlier_batches_when_a_later_one_blows_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Карточки сохраняются пачка за пачкой, а не одной транзакцией в конце."""
+    from ankicards.review import actions
+
+    cfg = _config(tmp_path)
+    db = Database(tmp_path / "cards.db")
+    for n in range(4):
+        db.insert_card(Card(language="nb", word=f"ord{n}", pos=POS.NOUN, translation=f"с{n}"))
+    calls = 0
+
+    async def _boom_on_second(cards, db_, cfg_, **kw):  # type: ignore[no-untyped-def]
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("провайдер лёг")
+        return {}, set()
+
+    monkeypatch.setattr(actions, "enrich_and_generate_media", _boom_on_second)
+
+    with pytest.raises(RuntimeError):
+        await actions.accept_cards([1, 2, 3, 4], db, cfg, verified=True, batch_size=2)
+
+    assert [c.word for c in db.get_by_status(Status.APPROVED)] == ["ord0", "ord1"]
+    assert db.get_by_id(1).is_verified()  # type: ignore[union-attr]
+    assert not db.get_by_id(3).is_verified()  # type: ignore[union-attr]

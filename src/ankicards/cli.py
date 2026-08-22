@@ -569,6 +569,12 @@ def review_accept_cmd(
         "--verified",
         help="Пометить тегом verified::<дата> — «я это проверил лично»",
     ),
+    batch_size: int = typer.Option(
+        review_actions.ACCEPT_BATCH_SIZE,
+        "--batch-size",
+        min=1,
+        help="Сколько карточек обогащать за один заход",
+    ),
     as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
     language: str | None = _LANGUAGE_OPT,
 ) -> None:
@@ -587,7 +593,12 @@ def review_accept_cmd(
         try:
             results = asyncio.run(
                 review_actions.accept_cards(
-                    card_ids, db, cfg, language=cfg.language, verified=verified
+                    card_ids,
+                    db,
+                    cfg,
+                    language=cfg.language,
+                    verified=verified,
+                    batch_size=batch_size,
                 )
             )
         except ValueError as e:

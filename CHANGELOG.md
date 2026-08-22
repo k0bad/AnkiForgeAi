@@ -49,6 +49,12 @@ All notable changes to AnkiForgeAI will be documented in this file.
   review. Re-accepting a card neither duplicates the tag nor rewrites the first date.
 
 ### Changed
+- `ankiforgeai review accept` now enriches in batches (`--batch-size`, default 25)
+  instead of handing the whole list to one LLM call. Each enrich stage sends a single
+  request covering everything passed to it, and `review html` assembles its accept
+  command over the entire reviewed list — so accepting a hundred-plus cards in one go
+  would have cost the whole batch its grammatical forms. A batch that fails no longer
+  takes the earlier ones with it: cards are saved as each batch finishes.
 - `ankiforgeai review edit` can now set `pos`. Part of speech is not always derivable —
   `ingest bildetema` reads it off the article and falls back to an LLM for words that
   have none, and that call can simply fail — and until now a card that came out with the

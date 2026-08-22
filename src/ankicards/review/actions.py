@@ -20,6 +20,11 @@ from ..pipeline import _record, delete_card_record, enrich_and_generate_media
 # импортировать заново. Значение проверяется по enum — см. _validated().
 EDITABLE_FIELDS = ("word", "translation", "example", "example_translation", "pos")
 
+# Сколько карточек уходит в enrichment за один заход accept_cards(). Тот же предел,
+# что и у `ingest bildetema --batch-size`: enrich-стадия шлёт один LLM-вызов на весь
+# список, и формы для сотни слов в ответ не помещаются.
+ACCEPT_BATCH_SIZE = 25
+
 
 def _require_cards(card_ids: list[int], db: Database, language: str | None = None) -> list[Card]:
     cards: list[Card] = []
@@ -52,6 +57,7 @@ async def accept_cards(
     auto_pick_images: bool = True,
     language: str | None = None,
     verified: bool = False,
+    batch_size: int = ACCEPT_BATCH_SIZE,
 ) -> dict[int, str]:
     """Принять карточки: enrich + media, затем approved (или review, если
     enrichment оказался неполным). Возвращает {card_id: итоговый статус}.
@@ -64,22 +70,31 @@ async def accept_cards(
     отметка о личной проверке, поставленная автоматом, была бы просто неправдой.
     Тег ставится и тем карточкам, что вернулись в review из-за неполного
     enrichment: человек проверял слово и картинку, а не то, доехали ли формы.
+
+    Пачками по batch_size, а не всем списком разом: каждая enrich-стадия — это
+    один LLM-вызов на все переданные карточки, и ответ с грамматическими формами
+    для сотни слов не влезает в llm.max_tokens. После ревью сотни карточек
+    (`review html` собирает команду сразу на весь список) один такой вызов лишил
+    бы форм всю партию. Сорвавшаяся пачка не отменяет предыдущие — они уже
+    сохранены.
     """
     cards = _require_cards(card_ids, db, language)
     if not cards:
         return {}
 
-    _, incomplete_ids = await enrich_and_generate_media(
-        cards, db, cfg, auto_pick_images=auto_pick_images
-    )
     results: dict[int, str] = {}
-    for card in cards:
-        assert card.id is not None
-        card.status = Status.REVIEW if card.id in incomplete_ids else Status.APPROVED
-        tag = card.mark_verified() if verified else None
-        db.update_card(card)
-        _record(db, "info", "review_finalized", card.id, status=card.status.value, verified=tag)
-        results[card.id] = card.status.value
+    for start in range(0, len(cards), max(batch_size, 1)):
+        batch = cards[start : start + max(batch_size, 1)]
+        _, incomplete_ids = await enrich_and_generate_media(
+            batch, db, cfg, auto_pick_images=auto_pick_images
+        )
+        for card in batch:
+            assert card.id is not None
+            card.status = Status.REVIEW if card.id in incomplete_ids else Status.APPROVED
+            tag = card.mark_verified() if verified else None
+            db.update_card(card)
+            _record(db, "info", "review_finalized", card.id, status=card.status.value, verified=tag)
+            results[card.id] = card.status.value
     return results
 
 
