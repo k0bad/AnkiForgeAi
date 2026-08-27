@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import date, timedelta
+from pathlib import Path
 
 from .anki.connect import AnkiConnect, AnkiConnectError
 from .anki.notetype import _get_note_type_name as get_note_type_name
@@ -21,6 +22,7 @@ from .db import Database
 from .dedupe import check_card, judge_review
 from .enrich.examples import enrich_example_batch
 from .enrich.grammar import INFLECTED_POS, enrich_grammar_batch
+from .enrich.pos import classify_pos_batch
 from .enrich.pronunciation import enrich_pronunciation_batch
 from .enrich.translation import enrich_translation
 from .log import get_logger
@@ -65,6 +67,14 @@ def delete_card_record(db: Database, card: Card, action: str) -> None:
     assert card.id is not None, "delete_card_record ожидает уже сохранённую карточку"
     _record(db, "info", action, card.id, word=card.word, anki_note_id=card.anki_note_id)
     db.delete_card(card.id)
+
+
+def _has_media_file(filename: str | None, directory: Path) -> bool:
+    """Медиафайл уже лежит на диске. В БД хранится только имя (CLAUDE.md принцип 6),
+    поэтому заполненного поля мало — файл мог не доехать или быть удалён вручную."""
+    if not filename:
+        return False
+    return (directory / filename).exists()
 
 
 def _card_id(card: Card) -> int:
@@ -142,6 +152,15 @@ async def enrich_and_generate_media(
     incomplete_ids: set[int] = set()
 
     if auto_enrich and cards:
+        # Часть речи — первой: по ней грамматика решает, у кого вообще бывают формы
+        # (INFLECTED_POS), картиночная стадия — кому положено фото (images.only_for_pos),
+        # а Anki получает тег pos::noun, которым колода существительных отделяется от
+        # колоды глаголов. Раньше это делал только импортёр, приносивший часть речи
+        # с собой, поэтому после `--no-enrich` карточка оставалась POS.OTHER навсегда:
+        # accept её не трогал, и всё перечисленное она теряла молча. Вызов дешёвый —
+        # один батч на всю пачку и только для тех, у кого часть речи и правда неизвестна.
+        await classify_pos_batch(cards)
+
         # Pronunciation — обработана через _run_enrich_stage с per-card ошибками,
         # как grammar/examples: раньше делила try/except с translation ниже, и падение
         # batch-вызова не помечало карточки incomplete — они тихо уходили в APPROVED
@@ -258,7 +277,20 @@ async def enrich_and_generate_media(
             stats["audio"] += 1
             _record(db, "info", "audio_generated", card.id)
 
-        tasks = [_generate_audio_one(card) for card in cards]
+        # Карточку, которой медиафайл уже принесла другая стадия, не трогаем:
+        # источник со своими фото и записанным диктором аудио кладёт их до этой
+        # стадии, и TTS лёг бы поверх живой записи, а поиск в Unsplash — поверх
+        # картинки, гарантированно соответствующей слову. Ровно то же спасает от
+        # лишней перегенерации на пути review → accept, где enrichment гоняется
+        # повторно для карточек, у которых часть стадий уже отработала.
+        stats["media_reused"] = 0
+        audio_targets = []
+        for card in cards:
+            if _has_media_file(card.audio, cfg.paths.audio_dir):
+                stats["media_reused"] += 1
+            else:
+                audio_targets.append(card)
+        tasks = [_generate_audio_one(card) for card in audio_targets]
 
         # Картинки для существительных (если включено в конфиге). Разбивка по
         # причине отсутствия (issue #54): "не тот POS" — норма, для остальных
@@ -281,7 +313,10 @@ async def enrich_and_generate_media(
                     stats["images"]["failed_no_result"] += 1
 
             for card in cards:
-                if card.pos.value not in cfg.images.only_for_pos:
+                if _has_media_file(card.image, cfg.paths.images_dir):
+                    stats["images"]["found"] += 1
+                    stats["media_reused"] += 1
+                elif card.pos.value not in cfg.images.only_for_pos:
                     stats["images"]["skipped_not_noun"] += 1
                 else:
                     tasks.append(_attach_image_one(card))
@@ -297,8 +332,28 @@ async def run_ingest_pipeline(
     cfg: Config,
     auto_enrich: bool = True,
     auto_media: bool = True,
+    on_inserted: Callable[[list[Card]], Awaitable[None]] | None = None,
+    force_review: bool = False,
 ) -> dict:
     """Прогнать кандидатов через dedupe → enrich → media → save.
+
+    on_inserted вызывается для всех карточек, получивших id, сразу после INSERT и
+    до enrichment — то есть в первой точке, где у карточки уже есть номер, а значит
+    и детерминированные имена медиафайлов (CLAUDE.md принцип 6). Через него
+    источник со своим медиа подкладывает готовое фото и аудио: media-стадия
+    ниже видит файлы на диске и не перезаписывает их своими (_has_media_file).
+
+    Сюда попадают и те, кого dedupe увёл в review: раньше колбэк звался только для
+    accepted, и карточка, отправленная на человеческую адъюдикацию, оставалась без
+    фото и звука навсегда — их скачивает только эта точка, а второй раз ingest той
+    же темы карточку уже не создаст (dedupe увидит её саму как дубль). Человек в
+    итоге решал судьбу карточки, глядя на пустое место вместо картинки, ради
+    которой к такому источнику и идут. Enrichment на них по-прежнему не тратится: они
+    могут оказаться дублями, а фото с CDN стоит одного запроса, а не токенов.
+
+    force_review=True оставляет все принятые карточки в статусе review вместо
+    approved — источник, которому доверяют не настолько, чтобы пускать его прямо
+    в push, всё равно проходит через человека.
 
     Возвращает статистику: {new: N, review: M, merged: K, ...}
     """
@@ -313,6 +368,7 @@ async def run_ingest_pipeline(
     }
 
     accepted: list[Card] = []
+    needs_review: list[Card] = []
     for card in cards:
         decision = check_card(card, db, cfg)
         decision = await judge_review(card, decision, cfg)
@@ -339,6 +395,7 @@ async def run_ingest_pipeline(
                 matches=[m.model_dump() for m in decision.matches],
                 reason=decision.reason,
             )
+            needs_review.append(card)
             stats["review"] += 1
             continue
         # Выделяем id сразу (INSERT, не UPDATE) — enrich_and_generate_media ниже
@@ -349,13 +406,24 @@ async def run_ingest_pipeline(
         accepted.append(card)
         stats["new"] += 1
 
+    inserted = accepted + needs_review
+    if on_inserted is not None and inserted:
+        await on_inserted(inserted)
+        # Карточки из review-ветки уже вставлены и ниже не сохраняются: цикл в конце
+        # идёт только по accepted. Всё, что колбэк проставил (имена скачанных фото и
+        # аудио), осталось бы жить в объекте и умерло бы вместе с ним — файлы на диске,
+        # колонки в БД пустые.
+        for card in needs_review:
+            db.update_card(card)
+
     enrich_stats, incomplete_ids = await enrich_and_generate_media(
         accepted, db, cfg, auto_enrich, auto_media
     )
     stats.update(enrich_stats)
 
     for card in accepted:
-        card.status = Status.REVIEW if card.id in incomplete_ids else Status.APPROVED
+        incomplete = card.id in incomplete_ids
+        card.status = Status.REVIEW if (incomplete or force_review) else Status.APPROVED
         db.update_card(card)
         _record(db, "info", "create", card.id, word=card.word)
 
@@ -394,7 +462,7 @@ async def push_approved(db: Database, anki: AnkiConnect, cfg: Config) -> int:
                     card.image = await anki.store_media(card.image, image_path)
 
             fields = card_to_anki_fields(card)
-            tags = card.auto_tags()
+            tags = card.auto_tags(cfg.tags)
             note_id = await anki.add_note(fields=fields, tags=tags)
 
             card.anki_note_id = note_id

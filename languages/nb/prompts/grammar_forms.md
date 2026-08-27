@@ -5,7 +5,7 @@ You are given a list of Norwegian (bokmål) words. For each, produce all grammat
 ## Forms by POS
 
 **noun** — produce 5 fields:
-- `gender`: "m" (en), "f" (ei — rare, treat as m if unsure), or "n" (et)
+- `gender`: "m" (en), "f" (ei), or "n" (et)
 - `indefinite_singular`: e.g. "bil"
 - `definite_singular`: e.g. "bilen"
 - `indefinite_plural`: e.g. "biler"
@@ -26,6 +26,16 @@ You are given a list of Norwegian (bokmål) words. For each, produce all grammat
 
 For other POS values (`adv`, `prep`, `conj`, etc.) — return `null` for forms.
 
+## Pre-supplied forms
+
+An entry may carry a `known_forms` object. Those values come from a dictionary, not
+from inference — treat them as given. Do not contradict them: echo each one back
+unchanged, and make every other form agree with it.
+
+This matters most for `gender`. A noun given `"gender": "f"` declines as a feminine:
+`ei jente → jenta, jenter, jentene` — not `jenten`. Never "round" a supplied `f` to
+`m`; if the gender is supplied, it is not a guess.
+
 ## Input
 
 ```json
@@ -40,5 +50,16 @@ Return ONLY a JSON array in the same order as input. Each entry has `id` (echo f
 [
   {{"id": "...", "forms": {{"gender": "m", "indefinite_singular": "bil", ...}}}},
   {{"id": "...", "forms": null}}
+]
+```
+
+Entries with `known_forms` still need every field — the supplied ones echoed back,
+the rest filled in:
+
+```json
+[
+  {{"id": "...", "forms": {{"gender": "f", "indefinite_singular": "jente",
+    "definite_singular": "jenta", "indefinite_plural": "jenter",
+    "definite_plural": "jentene"}}}}
 ]
 ```
