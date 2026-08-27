@@ -455,9 +455,7 @@ async def test_dispatch_fans_out_to_webhook_and_telegram_together(
         tmp_path,
         notifications=[
             NotificationConfig(type="webhook", enabled=True, url="http://n8n.test"),
-            NotificationConfig(
-                type="telegram", enabled=True, token="123:ABC", chat_id="42"
-            ),
+            NotificationConfig(type="telegram", enabled=True, token="123:ABC", chat_id="42"),
         ],
     )
 
