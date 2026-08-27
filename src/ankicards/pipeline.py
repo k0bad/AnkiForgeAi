@@ -378,14 +378,20 @@ async def push_approved(db: Database, anki: AnkiConnect, cfg: Config) -> int:
     pushed = 0
     for card in approved:
         try:
+            # Имя в коллекции Anki может разойтись с локальным: store_media не
+            # затирает чужой файл с таким же именем, а кладётся рядом (см. её
+            # докстроку). В заметку идёт то, что вернулось, иначе она сошлётся
+            # на чужое аудио. Локальное имя остаётся детерминированным —
+            # card.audio/card.image правятся только в памяти, UPDATE ниже
+            # трогает лишь status и anki_note_id.
             if card.audio:
                 audio_path = cfg.paths.audio_dir / card.audio
                 if audio_path.exists():
-                    await anki.store_media(card.audio, audio_path)
+                    card.audio = await anki.store_media(card.audio, audio_path)
             if card.image:
                 image_path = cfg.paths.images_dir / card.image
                 if image_path.exists():
-                    await anki.store_media(card.image, image_path)
+                    card.image = await anki.store_media(card.image, image_path)
 
             fields = card_to_anki_fields(card)
             tags = card.auto_tags()

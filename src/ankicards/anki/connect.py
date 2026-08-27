@@ -37,10 +37,16 @@ class AnkiConnectError(Exception):
 class AnkiConnect:
     """Тонкая обёртка над AnkiConnect API."""
 
-    def __init__(self, cfg: Config, timeout: float = DEFAULT_TIMEOUT) -> None:
+    def __init__(
+        self, cfg: Config, timeout: float = DEFAULT_TIMEOUT, deck: str | None = None
+    ) -> None:
         profile = resolve_anki_profile(cfg)
         self.url = profile.url
-        self.deck = profile.deck_name
+        # deck — разовая подмена колоды на один запуск (`push --deck`). Постоянная
+        # живёт в languages/{code}/language.yaml, но это файл общего профиля языка:
+        # отправить один набор карточек в отдельную колоду, не переписав его для
+        # всех, иначе было нечем.
+        self.deck = deck or profile.deck_name
         self.note_type = profile.note_type
         self._timeout = timeout
 
@@ -176,8 +182,34 @@ class AnkiConnect:
 
     # ───────────── Media ─────────────
 
-    async def store_media(self, filename: str, file_path: Path) -> str:
-        """Загрузить файл в collection.media. Возвращает имя файла в Anki."""
+    async def store_media(
+        self, filename: str, file_path: Path, delete_existing: bool = False
+    ) -> str:
+        """Загрузить файл в collection.media. Возвращает имя файла в Anki.
+
+        Возвращённое имя может отличаться от запрошенного — и вызывающий обязан
+        подставлять в заметку именно его, а не то, что просил.
+
+        collection.media — одна плоская папка на всю коллекцию, общая для всех
+        колод. А имена у нас вида `{card.id}_nb.mp3`, и card.id уникален лишь
+        внутри одной базы SQLite. Две базы дают два файла `1_nb.mp3` с разным
+        содержимым, и storeMediaFile со значением deleteExisting по умолчанию
+        (true) молча затирает чужой — заметка, которая на него ссылалась,
+        начинает проигрывать чужое слово. Так и вышло: отправка 1223 карточек из
+        второй базы переписала аудио всем 297 заметкам соседней колоды.
+
+        deleteExisting=False снимает это: одинаковое содержимое кладётся под тем
+        же именем (повторный push карточки ничего не плодит), а расходящееся —
+        под именем с хэшем содержимого, которое и возвращается.
+        """
         data = file_path.read_bytes()
         encoded = base64.b64encode(data).decode("ascii")
-        return cast(str, await self._call("storeMediaFile", filename=filename, data=encoded))
+        return cast(
+            str,
+            await self._call(
+                "storeMediaFile",
+                filename=filename,
+                data=encoded,
+                deleteExisting=delete_existing,
+            ),
+        )
