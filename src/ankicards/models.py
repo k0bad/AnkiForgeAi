@@ -12,6 +12,14 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from .config import TagsConfig, get_config
+
+# Префикс тега «эту карточку человек посмотрел глазами и одобрил» (Card.mark_verified).
+# Отдельно от auto_tags(): те выводятся из метаданных карточки и появляются сами,
+# а этот ставится только действием человека — импортированному материалу он на
+# слово не выдаётся.
+VERIFIED_TAG_PREFIX = "verified"
+
 
 class POS(StrEnum):
     """Часть речи (Part Of Speech)."""
@@ -100,18 +108,46 @@ class Card(BaseModel):
     # Anki-specific (заполняется после push)
     anki_note_id: int | None = None
 
-    def auto_tags(self) -> list[str]:
-        """Сгенерировать иерархические теги Anki из метаданных."""
+    def mark_verified(self, day: date | None = None) -> str:
+        """Пометить карточку как просмотренную человеком; вернуть навешенный тег.
+
+        Тег иерархический (`verified::2026-08-21`), поэтому в Anki по `tag:verified::*`
+        находятся все проверенные разом, а по конкретной дате — то, что смотрелось в
+        тот заход. Повторный accept той же карточки тег не дублирует, но и дату
+        первой проверки не переписывает: важно, когда человек её увидел впервые.
+        """
+        tag = f"{VERIFIED_TAG_PREFIX}::{(day or date.today()).isoformat()}"
+        if not any(t.startswith(f"{VERIFIED_TAG_PREFIX}::") for t in self.tags):
+            self.tags.append(tag)
+        return tag
+
+    def is_verified(self) -> bool:
+        """Карточку уже подтверждал человек (см. mark_verified)."""
+        return any(t.startswith(f"{VERIFIED_TAG_PREFIX}::") for t in self.tags)
+
+    def auto_tags(self, tags: TagsConfig | None = None) -> list[str]:
+        """Сгенерировать иерархические теги Anki из метаданных.
+
+        Префиксы берутся из секции `tags:` в config.yaml. Раньше они стояли здесь
+        литералами, и секция не делала ничего: переименовать `topic::` во что-то
+        своё было нельзя — настройка была, эффекта не было.
+
+        `tags=None` — прочитать активный конфиг. Код, у которого Config уже под
+        рукой (pipeline.push_approved), передаёт секцию явно: так теги считаются
+        из того же Config, что и всё остальное в этом запуске, включая
+        подменённый через `--language`.
+        """
+        prefixes = tags if tags is not None else get_config().tags
         result = list(self.tags)
         if self.topic:
-            result.append(f"topic::{self.topic}")
+            result.append(f"{prefixes.topic_prefix}::{self.topic}")
         if self.level:
-            result.append(f"level::{self.level.value}")
-        result.append(f"pos::{self.pos.value}")
+            result.append(f"{prefixes.level_prefix}::{self.level.value}")
+        result.append(f"{prefixes.pos_prefix}::{self.pos.value}")
         if self.source:
             # source может содержать URL — берём только домен или префикс
             src = self.source.split(":")[0] if ":" in self.source else self.source
-            result.append(f"source::{src}")
+            result.append(f"{prefixes.source_prefix}::{src}")
         return result
 
 

@@ -225,17 +225,41 @@ class Database:
         with self.connect() as conn:
             conn.execute(
                 """UPDATE cards SET
-                    pronunciation = ?, translation = ?, example = ?, example_translation = ?,
-                    forms = ?, image = ?, audio = ?, status = ?
+                    pronunciation = ?, translation = ?, image_query = ?, example = ?,
+                    example_translation = ?, pos = ?, topic = ?, forms = ?, image = ?,
+                    audio = ?, tags = ?, status = ?
                    WHERE id = ?""",
                 (
                     card.pronunciation,
                     card.translation,
+                    # image_query — англ. gloss, по которому ищется фото. Его пишет
+                    # enrich.translation отдельным LLM-вызовом на карточку, и до сих
+                    # пор этот вызов был впустую: колонки в UPDATE не было, значение
+                    # жило только в объекте. Фото при этом искалось по норвежскому
+                    # слову (images.py: `card.image_query or card.word`), а на
+                    # повторном accept gloss генерировался заново — и снова терялся.
+                    card.image_query,
                     card.example,
                     card.example_translation,
+                    # pos — потому что его меняет не только человек через `review edit`
+                    # (у того свой UPDATE), но и enrich.pos на accept. Без этой колонки
+                    # разобранная часть речи жила только в объекте и умирала вместе с
+                    # ним: карточка оставалась `other`, а с ней теряла и грамматические
+                    # формы, и тег pos::noun, по которому в Anki режут колоды.
+                    card.pos.value,
+                    # topic — по той же причине, что и pos выше: его меняет не
+                    # только человек через `review edit`, но и enrich.topics,
+                    # раскладывающая по темам слова, пришедшие без неё. Без этой
+                    # колонки разложенная тема жила бы только в объекте и умирала
+                    # вместе с ним — а с ней и тег topic::, ради которого всё.
+                    card.topic,
                     json.dumps(card.forms) if card.forms else None,
                     card.image,
                     card.audio,
+                    # tags попадают сюда, потому что их меняет не только ingest:
+                    # accept навешивает verified-тег (Card.mark_verified), и без
+                    # этой колонки он терялся бы на первом же update_card.
+                    json.dumps(card.tags),
                     card.status.value,
                     card.id,
                 ),

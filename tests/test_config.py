@@ -25,6 +25,7 @@ from ankicards.config import (
     TagsConfig,
     TTSConfig,
 )
+from ankicards.models import POS, Card, Level
 
 
 def _make_config(prompts_dir: Path) -> Config:
@@ -148,3 +149,55 @@ def test_load_prompt_resolves_bundled_copy_with_no_per_language_prompt(
     result = llm_module.load_prompt("dedupe_judge")
 
     assert result == "bundled dedupe judge prompt"
+
+
+def test_tag_prefixes_come_from_config() -> None:
+    """Секция tags: в config.yaml должна реально переименовывать префиксы.
+
+    Раньше Card.auto_tags() писал "topic::"/"level::"/"pos::"/"source::"
+    литералами и эту секцию не читал — настройка существовала, а эффекта
+    не давала.
+    """
+    card = Card(
+        language="nb",
+        word="hund",
+        translation="собака",
+        pos=POS.NOUN,
+        level=Level.A1,
+        topic="dyr::kjæledyr",
+        source="picture-dict:V0001",
+    )
+
+    renamed = card.auto_tags(
+        TagsConfig(
+            topic_prefix="tema",
+            level_prefix="nivå",
+            pos_prefix="ordklasse",
+            source_prefix="kilde",
+        )
+    )
+
+    assert "tema::dyr::kjæledyr" in renamed
+    assert "nivå::a1" in renamed
+    assert "ordklasse::noun" in renamed
+    assert "kilde::picture-dict" in renamed
+    assert not any(t.startswith("topic::") for t in renamed)
+
+
+def test_tag_prefixes_default_to_the_documented_ones() -> None:
+    card = Card(
+        language="nb",
+        word="hund",
+        translation="собака",
+        pos=POS.NOUN,
+        level=Level.A1,
+        topic="dyr::kjæledyr",
+        source="picture-dict:V0001",
+    )
+
+    assert card.auto_tags(TagsConfig()) == [
+        "topic::dyr::kjæledyr",
+        "level::a1",
+        "pos::noun",
+        "source::picture-dict",
+    ]
