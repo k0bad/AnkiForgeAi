@@ -261,3 +261,46 @@ async def test_finalize_accepted_skip_choice_leaves_card_without_image(
     saved_card = db.get_by_id(card.id)
     assert saved_card is not None
     assert saved_card.image is None
+
+
+# ───────────────────── review html --status ─────────────────────
+
+
+def test_review_html_status_table_covers_every_status() -> None:
+    """Таблица --status обязана знать все статусы: пропущенный означает, что до
+    таких карточек страницей не добраться вовсе, а узнается это только в бою."""
+    from ankicards.cli import _REVIEW_HTML_STATUSES
+
+    covered = {s for statuses in _REVIEW_HTML_STATUSES.values() for s in statuses}
+    assert covered == set(Status)
+    assert _REVIEW_HTML_STATUSES["open"] == (Status.REVIEW, Status.PENDING)
+    assert _REVIEW_HTML_STATUSES["all"] == tuple(Status)
+
+
+def test_review_html_default_hides_already_accepted_cards(tmp_path: Path) -> None:
+    """По умолчанию страница про то, что ждёт решения, — принятое туда не лезет.
+
+    Перечитать approved всё же нужно (в одной такой нашлась опечатка, пережившая
+    ручную проверку), но по явному --status approved, а не заодно с остальным.
+    """
+    from ankicards.cli import _REVIEW_HTML_STATUSES
+
+    cfg = _make_config(tmp_path)
+    db = Database(cfg.paths.db)
+    waiting = Card(language="nb", word="lue", pos=POS.NOUN, translation="шапка")
+    waiting.status = Status.REVIEW
+    db.insert_card(waiting)
+    done = Card(language="nb", word="sko", pos=POS.NOUN, translation="ботинок")
+    done.status = Status.APPROVED
+    db.insert_card(done)
+
+    def _collect(status: str) -> list[str]:
+        return [
+            card.word
+            for st in _REVIEW_HTML_STATUSES[status]
+            for card in db.get_by_status(st, cfg.language)
+        ]
+
+    assert _collect("open") == ["lue"]
+    assert _collect("approved") == ["sko"]
+    assert sorted(_collect("all")) == ["lue", "sko"]

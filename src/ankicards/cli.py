@@ -6,10 +6,15 @@
     ingest topic <TOPIC>          Генерация по теме через Claude
     review                        Интерактивный ревью pending (нужен TTY)
     review list                   Список pending/review-карточек (--json) — без TTY
+    review html                   Страница ревью с фото и звуком (--out FILE) — без TTY
     review accept <id...>         Принять карточки (enrich + media → approved) — без TTY
+                                  --verified: тег verified::<дата>, «проверил лично»
     review skip/suspend <id...>   Отклонить/отложить карточки — без TTY
     review resume <id...>         Вернуть suspended/skipped обратно в review — без TTY
     review edit <id> -f k=v       Отредактировать поля карточки — без TTY
+    enrich pronunciation          Догнать транскрипцию по всей базе (LLM, батчами)
+    enrich examples               Догнать пример с переводом (LLM, батчами)
+    enrich topics                 Разложить по темам слова, пришедшие без неё
     push                          Approved → Anki
     sync                          Обновить кэш заметок из Anki
     delete <id...>                Удалить карточки насовсем (Anki + БД), освободить номер
@@ -24,10 +29,14 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from collections.abc import Callable
+from datetime import date
+from pathlib import Path
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
 from .anki.connect import AnkiConnect, AnkiConnectError
@@ -51,12 +60,16 @@ from .doctor import (
     count_images_skipped_not_noun,
     find_inconsistencies,
 )
+from .enrich import backfill
+from .enrich import topics as topics_stage
+from .enrich.examples import enrich_example_batch
+from .enrich.pronunciation import enrich_pronunciation_batch
 from .ingest.topic import ingest_by_topic
 from .ingest.url import ingest_from_url
 from .log import bound_run, get_logger
 from .migrate_ids import migrate_ids as run_migrate_ids
 from .migrate_ids import needs_migration
-from .models import Status
+from .models import Card, Status
 from .pipeline import (
     NoteTypeMissingError,
     check_level_progress,
@@ -65,6 +78,7 @@ from .pipeline import (
     run_ingest_pipeline,
 )
 from .review import actions as review_actions
+from .review import html_report
 from .review.interactive import review_pending
 
 logger = get_logger(__name__)
@@ -89,6 +103,11 @@ review_app = typer.Typer(
     "list/accept/skip/suspend/edit — неинтерактивные, для скриптов и AI-агентов",
 )
 app.add_typer(review_app, name="review")
+enrich_app = typer.Typer(
+    no_args_is_help=True,
+    help="Дозаполнение полей у карточек, которые уже в базе",
+)
+app.add_typer(enrich_app, name="enrich")
 
 console = Console()
 
@@ -301,6 +320,24 @@ def ingest_topic_cmd(
         _print_level_totals(level_totals)
 
 
+# --status у `review html`. "open" — то, что ждёт решения; остальные значения дают
+# перечитать уже решённое, ничего в БД не меняя.
+_REVIEW_HTML_STATUSES: dict[str, tuple[Status, ...]] = {
+    "open": (Status.REVIEW, Status.PENDING),
+    "review": (Status.REVIEW,),
+    "pending": (Status.PENDING,),
+    "approved": (Status.APPROVED,),
+    "pushed": (Status.PUSHED,),
+    "skipped": (Status.SKIPPED,),
+    "suspended": (Status.SUSPENDED,),
+    "all": tuple(Status),
+}
+
+_REVIEW_OUT_OPT = typer.Option(
+    None, "--out", "-o", help="Куда положить файл (по умолчанию data/review/review-<язык>.html)"
+)
+
+
 @review_app.callback(invoke_without_command=True)
 def review(ctx: typer.Context, language: str | None = _LANGUAGE_OPT) -> None:
     """Без подкоманды — интерактивный ревью pending-карточек (нужен TTY)."""
@@ -343,6 +380,73 @@ def review_list_cmd(
     console.print(table)
 
 
+@review_app.command("html")
+def review_html_cmd(
+    out: Path | None = _REVIEW_OUT_OPT,
+    topic: str | None = typer.Option(
+        None, help="Только карточки, у которых topic содержит эту строку (напр. klær)"
+    ),
+    status: str = typer.Option(
+        "open",
+        "--status",
+        help="Какие карточки брать: open (review+pending, по умолчанию), approved, pushed, all",
+    ),
+    include_audio: bool = typer.Option(
+        True, "--audio/--no-audio", help="Вшивать mp3 в страницу (крупнее файл, но слышно диктора)"
+    ),
+    fragment: bool = typer.Option(
+        False, "--fragment", help="Без <html>/<head>/<body> — годится для публикации Artifact'ом"
+    ),
+    language: str | None = _LANGUAGE_OPT,
+) -> None:
+    """Собрать HTML-страницу ревью: все карточки review/pending с фото и звуком.
+
+    Ничего не меняет в БД — на выходе страница, где карточки отмечаются к отбраковке,
+    а кнопка собирает готовые `review skip ...` / `review accept ...` для терминала.
+    """
+    cfg = _cfg(language)
+    db = _open_db(cfg)
+
+    # Уже принятые карточки страница по умолчанию не показывает — она про то, что
+    # ждёт решения. Но перечитать approved иногда нужно (в одной такой нашлась
+    # опечатка, пережившая ручную проверку), а гонять ради этого 170 карточек через
+    # `review resume` значит менять им статус только чтобы посмотреть.
+    wanted = _REVIEW_HTML_STATUSES.get(status.strip().lower())
+    if wanted is None:
+        allowed = ", ".join(_REVIEW_HTML_STATUSES)
+        console.print(f"[red]✗[/] Неизвестный --status {status!r} (допустимы: {allowed})")
+        raise typer.Exit(code=1)
+
+    cards = [card for st in wanted for card in db.get_by_status(st, cfg.language)]
+    if topic:
+        needle = topic.casefold()
+        cards = [c for c in cards if c.topic and needle in c.topic.casefold()]
+    cards.sort(key=lambda c: c.id or 0)
+
+    if not cards:
+        console.print("[green]Нечего ревьюить.[/]")
+        return
+
+    path = out or (cfg.paths.db.parent / "review" / f"review-{cfg.language}.html")
+    subtitle = (
+        f"{len(cards)} карточек ждут решения. Отметь неподходящие — внизу появятся "
+        "команды для терминала."
+        if status.strip().lower() == "open"
+        else f"{len(cards)} карточек со статусом «{status}» — перечитать уже решённое. "
+        "Чтобы исправить: `review resume <id>`, затем `review edit` и `review accept --verified`."
+    )
+    markup = html_report.build_report(
+        cards,
+        cfg,
+        title=f"Ревью {topic or cfg.language}",
+        subtitle=subtitle,
+        include_audio=include_audio,
+        standalone=not fragment,
+    )
+    size = html_report.write_report(path, markup)
+    console.print(f"[green]✓[/] {path} ({size / 1024 / 1024:.1f} МБ, {len(cards)} карточек)")
+
+
 _CARD_IDS_ARG = typer.Argument(..., help="ID карточек (см. review list)")
 _FIELD_HELP = (
     f"поле=значение, можно повторять (доступны: {', '.join(review_actions.EDITABLE_FIELDS)})"
@@ -353,17 +457,42 @@ _FIELD_OPT = typer.Option(..., "--field", "-f", help=_FIELD_HELP)
 @review_app.command("accept")
 def review_accept_cmd(
     card_ids: list[int] = _CARD_IDS_ARG,
+    verified: bool = typer.Option(
+        False,
+        "--verified",
+        help="Пометить тегом verified::<дата> — «я это проверил лично»",
+    ),
+    batch_size: int = typer.Option(
+        review_actions.ACCEPT_BATCH_SIZE,
+        "--batch-size",
+        min=1,
+        help="Сколько карточек обогащать за один заход",
+    ),
     as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
     language: str | None = _LANGUAGE_OPT,
 ) -> None:
-    """Принять карточки без TTY: enrich + media, затем approved."""
+    """Принять карточки без TTY: enrich + media, затем approved.
+
+    --verified навешивает тег verified::<сегодня>, который уезжает в Anki вместе с
+    карточкой: потом по `tag:verified::*` видно всё, что проходило через твои глаза,
+    а по конкретной дате — что смотрелось в тот заход. Без флага тег не ставится:
+    этой же командой пользуются скрипты, и отметка о личной проверке от них была бы
+    неправдой.
+    """
     cfg = _cfg(language)
     db = _open_db(cfg)
 
     with bound_run("review_accept"):
         try:
             results = asyncio.run(
-                review_actions.accept_cards(card_ids, db, cfg, language=cfg.language)
+                review_actions.accept_cards(
+                    card_ids,
+                    db,
+                    cfg,
+                    language=cfg.language,
+                    verified=verified,
+                    batch_size=batch_size,
+                )
             )
         except ValueError as e:
             console.print(f"[red]✗[/] {e}")
@@ -375,6 +504,8 @@ def review_accept_cmd(
     for card_id, status in results.items():
         icon = "[green]✓[/]" if status == Status.APPROVED.value else "[yellow]⚠[/]"
         console.print(f"{icon} {card_id} → {status}")
+    if verified:
+        console.print(f"[green]✓[/] Помечены тегом verified::{date.today().isoformat()}")
 
 
 @review_app.command("skip")
@@ -454,15 +585,219 @@ def review_edit_cmd(
     console.print(f"[green]✓[/] {updated.word} обновлено: {', '.join(updates)}")
 
 
+_ENRICH_STATUS_OPT = typer.Option(
+    None,
+    "--status",
+    "-s",
+    help="Только карточки этих статусов (по умолчанию — все, кроме pushed)",
+)
+
+
+_CHUNK_OPT = typer.Option(
+    backfill.DEFAULT_CHUNK, "--chunk", help="Сколько карточек уходит в один LLM-вызов"
+)
+_LIMIT_OPT = typer.Option(
+    0, "--limit", help="Обработать не больше N карточек (0 — все); удобно для пробного прогона"
+)
+
+
+def _backfill_targets(cfg: Config, db: Database, statuses: list[str]) -> list[Card]:
+    wanted: list[Status] = [s for s in Status if s is not Status.PUSHED]
+    if statuses:
+        try:
+            wanted = [Status(s) for s in statuses]
+        except ValueError as e:
+            allowed = ", ".join(s.value for s in Status)
+            console.print(f"[red]✗[/] {e}. Допустимы: {allowed}")
+            raise typer.Exit(code=1) from e
+    # pending первыми: это слова, которые человек внёс сам и которые пока пустые,
+    # тогда как review-карточки чаще приходят от источника уже с фото и звуком.
+    order = {Status.PENDING: 0, Status.REVIEW: 1}
+    cards = [c for status in wanted for c in db.get_by_status(status, language=cfg.language)]
+    cards.sort(key=lambda c: (order.get(c.status, 2), c.id or 0))
+    return cards
+
+
+async def _run_backfill(
+    stage: str,
+    fn: backfill.StageFn,
+    is_complete: Callable[[Card], bool],
+    cards: list[Card],
+    db: Database,
+    chunk: int,
+    dry_run: bool,
+    limit: int = 0,
+) -> backfill.BackfillReport:
+    pending = sum(1 for c in cards if not is_complete(c))
+    if limit:
+        pending = min(pending, limit)
+    console.print(f"[cyan]→[/] {stage}: {pending} карточек, по {chunk} за вызов")
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as bar:
+        task = bar.add_task(stage, total=max(pending, 1))
+
+        def _tick(done: int, total: int) -> None:
+            bar.update(task, completed=done, total=total)
+
+        return await backfill.backfill_stage(
+            stage,
+            fn,
+            is_complete,
+            cards,
+            db,
+            chunk_size=chunk,
+            progress=_tick,
+            dry_run=dry_run,
+            limit=limit,
+        )
+
+
+def _print_backfill_report(report: backfill.BackfillReport) -> None:
+    counts = report.counts()
+    console.print(
+        f"[green]✓[/] {report.stage}: заполнено {counts['done']} за {counts['calls']} вызовов"
+    )
+    if report.empty:
+        ids = ", ".join(str(i) for i in report.empty[:20])
+        more = f" (+{len(report.empty) - 20})" if len(report.empty) > 20 else ""
+        console.print(f"[yellow]![/] модель ничего не вернула для {len(report.empty)}: {ids}{more}")
+    for failure in report.failed:
+        console.print(
+            f"[red]✗[/] сорвался вызов на {len(failure['ids'])} карточках: {failure['error'][:160]}"
+        )
+    if report.failed:
+        console.print("[dim]повторный запуск той же команды доберёт то, что не легло[/]")
+
+
+@enrich_app.command("pronunciation")
+def enrich_pronunciation_cmd(
+    statuses: list[str] = _ENRICH_STATUS_OPT,
+    chunk: int = _CHUNK_OPT,
+    limit: int = _LIMIT_OPT,
+    dry_run: bool = typer.Option(False, "--dry-run", help="Показать объём работы и выйти"),
+    language: str | None = _LANGUAGE_OPT,
+) -> None:
+    """Догнать транскрипцию у карточек, где её нет (LLM, батчами).
+
+    Тип транскрипции — из `transcription:` в config.yaml. Статус карточек не
+    меняется: это дозаполнение поля, решение по карточке остаётся за человеком.
+    """
+    cfg = _cfg(language)
+    db = _open_db(cfg)
+    cards = _backfill_targets(cfg, db, statuses)
+    with bound_run("enrich-pronunciation"):
+        report = asyncio.run(
+            _run_backfill(
+                "pronunciation",
+                enrich_pronunciation_batch,
+                lambda c: bool(c.pronunciation),
+                cards,
+                db,
+                chunk,
+                dry_run,
+                limit,
+            )
+        )
+    _print_backfill_report(report)
+
+
+@enrich_app.command("examples")
+def enrich_examples_cmd(
+    statuses: list[str] = _ENRICH_STATUS_OPT,
+    chunk: int = _CHUNK_OPT,
+    limit: int = _LIMIT_OPT,
+    dry_run: bool = typer.Option(False, "--dry-run", help="Показать объём работы и выйти"),
+    language: str | None = _LANGUAGE_OPT,
+) -> None:
+    """Догнать пример с переводом у карточек, где его нет (LLM, батчами)."""
+    cfg = _cfg(language)
+    db = _open_db(cfg)
+    cards = _backfill_targets(cfg, db, statuses)
+    with bound_run("enrich-examples"):
+        report = asyncio.run(
+            _run_backfill(
+                "examples",
+                enrich_example_batch,
+                lambda c: bool(c.example and c.example_translation),
+                cards,
+                db,
+                chunk,
+                dry_run,
+                limit,
+            )
+        )
+    _print_backfill_report(report)
+
+
+@enrich_app.command("topics")
+def enrich_topics_cmd(
+    statuses: list[str] = _ENRICH_STATUS_OPT,
+    chunk: int = _CHUNK_OPT,
+    limit: int = _LIMIT_OPT,
+    dry_run: bool = typer.Option(False, "--dry-run", help="Показать объём работы и выйти"),
+    language: str | None = _LANGUAGE_OPT,
+) -> None:
+    """Разложить по темам слова, пришедшие без неё или с придуманной на ходу.
+
+    Справочник тем — те, что уже есть в базе, плюс `extra_topics` из языкового
+    профиля. Слову, которому ни одна тема не подходит, модель отвечает `null`, и
+    карточка остаётся как была: пустая тема лучше натянутой.
+    """
+    cfg = _cfg(language)
+    db = _open_db(cfg)
+    cards = _backfill_targets(cfg, db, statuses)
+    taxonomy = topics_stage.known_topics(db, cfg)
+    console.print(f"[cyan]→[/] справочник тем: {len(taxonomy)}")
+    with bound_run("enrich-topics"):
+        report = asyncio.run(
+            _run_backfill(
+                "topics",
+                topics_stage.classify_topics_batch(taxonomy),
+                topics_stage.has_topic,
+                cards,
+                db,
+                chunk,
+                dry_run,
+                limit,
+            )
+        )
+    _print_backfill_report(report)
+    if report.done and not dry_run:
+        counts: dict[str, int] = {}
+        for card in cards:
+            if card.id in set(report.done) and card.topic:
+                counts[card.topic] = counts.get(card.topic, 0) + 1
+        for topic, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+            console.print(f"    {n:>3}  {topic}")
+
+
 @app.command()
 def push(
+    deck: str | None = typer.Option(
+        None, "--deck", help="Отправить в эту колоду вместо той, что в профиле языка"
+    ),
     as_json: bool = typer.Option(False, "--json", help="Машиночитаемый JSON-вывод"),
     language: str | None = _LANGUAGE_OPT,
 ) -> None:
-    """Отправить approved-карточки в Anki."""
+    """Отправить approved-карточки в Anki.
+
+    `--deck` подменяет колоду на один запуск. Постоянная лежит в
+    `languages/{code}/language.yaml`, но это общий профиль языка: отправить
+    отдельный набор карточек в свою колоду, не переписав его для всех, иначе
+    было нечем. Колода верхнего уровня, а не подколода: `deck:Norsk` в Anki
+    матчит и вложенные, так что `sync` соседней базы затянул бы чужие заметки.
+    """
     cfg = _cfg(language)
     db = _open_db(cfg)
-    anki = AnkiConnect(cfg)
+    anki = AnkiConnect(cfg, deck=deck)
+    if deck:
+        console.print(f"[cyan]→[/] колода: {anki.deck}")
 
     async def _run() -> tuple[int, list[dict]]:
         count = await push_approved(db, anki, cfg)

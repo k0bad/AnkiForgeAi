@@ -11,10 +11,35 @@ from __future__ import annotations
 from ..anki.connect import AnkiConnect
 from ..config import Config
 from ..db import Database
-from ..models import Card, Status
+from ..models import POS, Card, Status
 from ..pipeline import _record, delete_card_record, enrich_and_generate_media
 
-EDITABLE_FIELDS = ("word", "translation", "example", "example_translation")
+# pos тут потому, что определить часть речи автоматически удаётся не всегда
+# (источник иногда даёт её сам — скажем, по артиклю, — а иначе её определяет LLM,
+# который может и не ответить). Без правки такую карточку оставалось только удалить и
+# импортировать заново. Значение проверяется по enum — см. _validated().
+# topic здесь потому, что тема — не украшение, а механизм сортировки: из неё
+# растёт тег `topic::`, которым в Anki режут колоды. `enrich topics` намеренно
+# оставляет человеку то, чему не нашла места (пустая тема лучше натянутой), и без
+# правки этого поля разложить такую карточку было нечем.
+EDITABLE_FIELDS = (
+    "word",
+    "translation",
+    "example",
+    "example_translation",
+    "pos",
+    "topic",
+    # image_query — англ. gloss, по которому ищется фото. Модель ставит его сама и
+    # регулярно попадается на ложных друзьях: `hat` («ненависть») превратился в
+    # `classic fedora hat`, `bart` («усы») — в `beard`. Увидеть это можно только
+    # глазами на ревью, и тогда нужно чем-то поправить.
+    "image_query",
+)
+
+# Сколько карточек уходит в enrichment за один заход accept_cards(). Тот же предел,
+# что и у `--batch-size` у импортёров: enrich-стадия шлёт один LLM-вызов на весь
+# список, и формы для сотни слов в ответ не помещаются.
+ACCEPT_BATCH_SIZE = 25
 
 
 def _require_cards(card_ids: list[int], db: Database, language: str | None = None) -> list[Card]:
@@ -47,27 +72,45 @@ async def accept_cards(
     cfg: Config,
     auto_pick_images: bool = True,
     language: str | None = None,
+    verified: bool = False,
+    batch_size: int = ACCEPT_BATCH_SIZE,
 ) -> dict[int, str]:
     """Принять карточки: enrich + media, затем approved (или review, если
     enrichment оказался неполным). Возвращает {card_id: итоговый статус}.
 
     auto_pick_images=False — см. enrich_and_generate_media: используется
     review_pending(), которое само подбирает картинку с человеком после этого вызова.
+
+    verified=True навешивает тег «человек посмотрел и одобрил» (Card.mark_verified).
+    Флагом, а не по умолчанию: эту же функцию дёргают скрипты и AI-агенты, и
+    отметка о личной проверке, поставленная автоматом, была бы просто неправдой.
+    Тег ставится и тем карточкам, что вернулись в review из-за неполного
+    enrichment: человек проверял слово и картинку, а не то, доехали ли формы.
+
+    Пачками по batch_size, а не всем списком разом: каждая enrich-стадия — это
+    один LLM-вызов на все переданные карточки, и ответ с грамматическими формами
+    для сотни слов не влезает в llm.max_tokens. После ревью сотни карточек
+    (`review html` собирает команду сразу на весь список) один такой вызов лишил
+    бы форм всю партию. Сорвавшаяся пачка не отменяет предыдущие — они уже
+    сохранены.
     """
     cards = _require_cards(card_ids, db, language)
     if not cards:
         return {}
 
-    _, incomplete_ids = await enrich_and_generate_media(
-        cards, db, cfg, auto_pick_images=auto_pick_images
-    )
     results: dict[int, str] = {}
-    for card in cards:
-        assert card.id is not None
-        card.status = Status.REVIEW if card.id in incomplete_ids else Status.APPROVED
-        db.update_card(card)
-        _record(db, "info", "review_finalized", card.id, status=card.status.value)
-        results[card.id] = card.status.value
+    for start in range(0, len(cards), max(batch_size, 1)):
+        batch = cards[start : start + max(batch_size, 1)]
+        _, incomplete_ids = await enrich_and_generate_media(
+            batch, db, cfg, auto_pick_images=auto_pick_images
+        )
+        for card in batch:
+            assert card.id is not None
+            card.status = Status.REVIEW if card.id in incomplete_ids else Status.APPROVED
+            tag = card.mark_verified() if verified else None
+            db.update_card(card)
+            _record(db, "info", "review_finalized", card.id, status=card.status.value, verified=tag)
+            results[card.id] = card.status.value
     return results
 
 
@@ -119,10 +162,26 @@ def resume_cards(card_ids: list[int], db: Database, language: str | None = None)
     return _set_status(card_ids, Status.REVIEW, "review_resume", db, language)
 
 
+def _validated(field: str, value: str) -> str:
+    """Привести значение к тому, что колонка реально принимает.
+
+    Текстовые поля пишутся как есть, но `pos` — это enum: опечатка вроде
+    `adjective` не помешает UPDATE, зато карточка перестанет читаться из БД
+    (Card.model_validate упадёт на неизвестном значении). Ловим на входе.
+    """
+    if field != "pos":
+        return value
+    try:
+        return POS(value.strip().lower()).value
+    except ValueError as e:
+        allowed = ", ".join(p.value for p in POS)
+        raise ValueError(f"Неизвестная часть речи {value!r} (допустимы: {allowed})") from e
+
+
 def edit_card(
     card_id: int, updates: dict[str, str], db: Database, language: str | None = None
 ) -> Card:
-    _require_cards([card_id], db, language)
+    card = _require_cards([card_id], db, language)[0]
     bad_fields = [k for k in updates if k not in EDITABLE_FIELDS]
     if bad_fields:
         raise ValueError(
@@ -132,10 +191,33 @@ def edit_card(
     if not updates:
         raise ValueError("Не указано ни одного поля для изменения")
 
+    updates = {field: _validated(field, value) for field, value in updates.items()}
+
+    # Смена части речи обнуляет формы: они были сгенерированы под прежний POS и
+    # к новому не относятся (склонение существительного у глагола — мусор, а не
+    # данные). Пустое поле честнее неверного, и следующий accept сгенерирует
+    # правильные — enrich_grammar_batch смотрит как раз на card.pos.
+    cleared: set[str] = set()
+    if "pos" in updates and updates["pos"] != card.pos.value:
+        cleared.add("forms")
+    # Смена самого заголовка обесценивает всё, что из него выведено: парадигму
+    # (sokker склоняется не как sokk), транскрипцию (она читает прежнее слово) и
+    # пример вместе с переводом (в предложении стоит прежнее слово). Раньше
+    # чистились только формы и только при смене pos, так что переименование
+    # оставляло карточку внутренне противоречивой — заголовок один, а
+    # произношение и пример про другое слово.
+    if "word" in updates and updates["word"] != card.word:
+        cleared |= {"forms", "pronunciation", "example", "example_translation"}
+    # Явно присланное значение сильнее сброса: `-f word=sokk -f example=...`
+    # должен записать пример, а не обнулить его следом.
+    cleared -= set(updates)
+
     with db.connect() as conn:
         set_clause = ", ".join(f"{k} = ?" for k in updates)
+        for column in sorted(cleared):
+            set_clause += f", {column} = NULL"
         conn.execute(f"UPDATE cards SET {set_clause} WHERE id = ?", (*updates.values(), card_id))
-    _record(db, "info", "review_edit", card_id, **updates)
+    _record(db, "info", "review_edit", card_id, **updates, cleared=sorted(cleared))
 
     updated = db.get_by_id(card_id)
     assert updated is not None

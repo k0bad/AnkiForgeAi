@@ -136,6 +136,77 @@ def test_edit_card_updates_fields_and_logs_action(db: Database) -> None:
     assert "review_edit" in _audit_actions(db, card.id)
 
 
+def test_edit_word_clears_what_was_derived_from_it(db: Database) -> None:
+    """Переименование обесценивает парадигму, транскрипцию и пример разом."""
+    card = _card("sokker")
+    card.forms = {"gender": "m", "indefinite_singular": "sokker"}
+    card.pronunciation = "соккер"
+    card.example = "Jeg har nye sokker."
+    card.example_translation = "У меня новые носки."
+    db.insert_card(card)
+
+    updated = actions.edit_card(card.id, {"word": "sokk"}, db)
+
+    assert updated.word == "sokk"
+    assert updated.forms is None
+    assert updated.pronunciation is None
+    assert updated.example is None
+    assert updated.example_translation is None
+    assert updated.translation == "дом"  # не выведено из заголовка — остаётся
+
+
+def test_edit_word_keeps_explicitly_given_values(db: Database) -> None:
+    """Присланное в том же вызове поле сильнее сброса, иначе его тут же обнулит."""
+    card = _card("sokker")
+    card.example = "Jeg har nye sokker."
+    db.insert_card(card)
+
+    updated = actions.edit_card(card.id, {"word": "sokk", "example": "Jeg mistet en sokk."}, db)
+
+    assert updated.word == "sokk"
+    assert updated.example == "Jeg mistet en sokk."
+
+
+def test_edit_without_word_change_keeps_derived_fields(db: Database) -> None:
+    card = _card("hus")
+    card.pronunciation = "хюс"
+    card.example = "Huset er stort."
+    db.insert_card(card)
+
+    updated = actions.edit_card(card.id, {"word": "hus", "translation": "домик"}, db)
+
+    assert updated.pronunciation == "хюс"
+    assert updated.example == "Huset er stort."
+
+
+def test_topic_is_editable(db: Database) -> None:
+    """Тема — механизм сортировки, и то, что не разложила стадия, правит человек."""
+    card = _card("holder")
+    card.topic = "части-дома"
+    db.insert_card(card)
+
+    updated = actions.edit_card(card.id, {"topic": "hus-og-hjem::gang"}, db)
+
+    assert updated.topic == "hus-og-hjem::gang"
+    assert "topic::hus-og-hjem::gang" in updated.auto_tags()
+
+
+def test_update_card_persists_the_image_query(db: Database) -> None:
+    """Англ. gloss стоит отдельного LLM-вызова на карточку — терять его нельзя.
+
+    Пока колонки не было в UPDATE, вызов делался впустую: фото искалось по
+    норвежскому слову, а на повторном accept gloss генерировался заново.
+    """
+    card = _card("sykdom")
+    db.insert_card(card)
+    card.image_query = "illness"
+    db.update_card(card)
+
+    saved = db.get_by_id(card.id)
+    assert saved is not None
+    assert saved.image_query == "illness"
+
+
 def test_set_status_raises_on_missing_card(db: Database) -> None:
     with pytest.raises(ValueError, match="не найдены"):
         actions.skip_cards([999], db)
@@ -251,3 +322,87 @@ async def test_accept_cards_auto_pick_images_false_does_not_attach_image(
     saved = db.get_by_id(card.id)
     assert saved is not None
     assert saved.image is None
+
+
+# ───────────────────────── правка части речи ─────────────────────────
+
+
+def _seeded(tmp_path: Path, **overrides: object) -> tuple[Database, Card]:
+    db = Database(tmp_path / "cards.db")
+    fields: dict = {
+        "language": "nb",
+        "word": "glad",
+        "pos": POS.OTHER,
+        "translation": "рад",
+    }
+    fields.update(overrides)
+    card = Card(**fields)
+    db.insert_card(card)
+    return db, card
+
+
+def test_edit_can_fix_a_part_of_speech_the_classifier_got_wrong(tmp_path: Path) -> None:
+    """Без этого неверный POS чинился только удалением карточки и переимпортом."""
+    from ankicards.review import actions
+
+    db, _ = _seeded(tmp_path)
+
+    updated = actions.edit_card(1, {"pos": "adj"}, db)
+
+    assert updated.pos is POS.ADJECTIVE
+    assert db.get_by_id(1).pos is POS.ADJECTIVE  # type: ignore[union-attr]
+
+
+def test_edit_rejects_a_part_of_speech_that_is_not_in_the_enum(tmp_path: Path) -> None:
+    """Опечатка не помешала бы UPDATE, но карточка перестала бы читаться из БД."""
+    from ankicards.review import actions
+
+    db, _ = _seeded(tmp_path)
+
+    with pytest.raises(ValueError, match="Неизвестная часть речи"):
+        actions.edit_card(1, {"pos": "adjective"}, db)
+
+    assert db.get_by_id(1).pos is POS.OTHER  # type: ignore[union-attr]
+
+
+def test_edit_normalises_part_of_speech_case_and_spacing(tmp_path: Path) -> None:
+    from ankicards.review import actions
+
+    db, _ = _seeded(tmp_path)
+
+    assert actions.edit_card(1, {"pos": " ADJ "}, db).pos is POS.ADJECTIVE
+
+
+def test_changing_part_of_speech_drops_forms_generated_for_the_old_one(tmp_path: Path) -> None:
+    """Склонение существительного у прилагательного — мусор, а не данные;
+    пустые формы честнее, следующий accept сгенерирует правильные."""
+    from ankicards.review import actions
+
+    db, _ = _seeded(
+        tmp_path, word="varm", pos=POS.NOUN, forms={"gender": "m", "definite_singular": "varmen"}
+    )
+
+    updated = actions.edit_card(1, {"pos": "adj"}, db)
+
+    assert updated.forms is None
+
+
+def test_editing_text_leaves_forms_alone(tmp_path: Path) -> None:
+    """Обнуление форм привязано к смене POS, а не к любой правке."""
+    from ankicards.review import actions
+
+    db, _ = _seeded(tmp_path, word="hatt", pos=POS.NOUN, forms={"gender": "m"})
+
+    updated = actions.edit_card(1, {"translation": "шляпа"}, db)
+
+    assert updated.forms == {"gender": "m"}
+
+
+def test_repeating_the_same_part_of_speech_keeps_the_forms(tmp_path: Path) -> None:
+    from ankicards.review import actions
+
+    db, _ = _seeded(tmp_path, word="hatt", pos=POS.NOUN, forms={"gender": "m"})
+
+    updated = actions.edit_card(1, {"pos": "noun"}, db)
+
+    assert updated.forms == {"gender": "m"}
