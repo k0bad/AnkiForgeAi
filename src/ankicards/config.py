@@ -94,7 +94,12 @@ class LLMConfig(BaseModel):
     temperature: float = 0.3
     # Таймаут headless-вызова `claude -p` (только provider: claude_cli) — SDK-провайдеры
     # (anthropic/openrouter) таймаутятся сами, а subprocess CLI по умолчанию не ограничен.
-    claude_cli_timeout_seconds: int = 120
+    # 600, а не 120: каждый такой вызов заново поднимает CLI с полным системным
+    # промптом, а batch-стадии enrichment просят у модели формы/примеры сразу на
+    # десятки слов — замеренный вызов на 25 существительных шёл больше пяти минут.
+    # На 120 с он не отваливался «быстро и понятно», а уходил в три ретрая по две
+    # минуты и в итоге ронял всю пачку карточек обратно в review.
+    claude_cli_timeout_seconds: int = 600
 
 
 class TTSConfig(BaseModel):
@@ -223,6 +228,12 @@ class LanguageConfig(BaseModel):
     tts: dict[str, str] = Field(default_factory=dict)
     anki: AnkiProfileConfig = Field(default_factory=AnkiProfileConfig)
     back_labels: dict[str, str] = Field(default_factory=dict)
+    # Темы, которых нет в источнике-словаре, но которые нужны словам из учебника
+    # (глаголы, признаки, служебные слова). Дополняют список тем, уже
+    # встречающихся в базе — см. enrich/topics.py. Значение — пояснение для
+    # модели: по одному имени `småord::andre` не догадаться, что туда идёт,
+    # а темы из картинного словаря говорят сами за себя и пояснений не имеют.
+    extra_topics: dict[str, str] = Field(default_factory=dict)
 
     @property
     def prompts_dir(self) -> Path:
