@@ -18,10 +18,18 @@ venv/
 
 # Данные пользователя
 data/ankicards.db
+# резервные копии базы: .bak-*, .merged-*, всё, что кладут рядом перед правкой
+data/ankicards.db.*
 data/ankicards.db-journal
 data/ankicards.db-wal
 data/ankicards.db-shm
-data/logs/
+# всё, что складывается под data/ каталогами: логи, кэши источников, страницы
+# `review html`. Скачивается или собирается на месте — репозиторию не нужно
+data/*/
+# экспорт колод из Anki (exportPackage) — резервные копии перед правкой заметок
+*.apkg
+# каталог media, отложенный перед перенумерацией
+media.bak-*/
 media/audio/*.mp3
 media/images/*.jpg
 media/images/*.png

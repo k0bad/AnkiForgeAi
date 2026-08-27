@@ -4,7 +4,101 @@ All notable changes to AnkiForgeAI will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `ankiforgeai enrich topics` — sorts cards into topics, which is where the `topic::`
+  Anki tag comes from. Cards imported from a picture dictionary get theirs for free
+  (such a source keeps its own tree, `dyr::fugler`), but a word typed in from a lesson or a
+  spreadsheet arrives either with no topic at all or with one invented on the spot
+  (`еда-и-напитки` sitting next to the existing `mat-og-drikke`). In Anki's tag tree
+  those pile up separately and cannot be sorted alongside anything.
+  The catalogue is built from two sources: topics already present in the DB — that is,
+  the source dictionary's own tree — plus `extra_topics` from the language profile, for
+  what a picture dictionary cannot have in principle. Such a source is a dictionary of
+  *nouns*: it has no topic for a verb, an adverb or a preposition, so 74 of the 162
+  unsorted cards had nowhere to go. `languages/nb/language.yaml` now adds fourteen:
+  `handlinger::*`, `egenskaper`, `småord::*`, `språk-og-skrift`, `butikk-og-handel`,
+  `arbeid-og-yrke`, `gård-og-landbruk`, `former-og-figurer`, `bygninger-og-by`. Each
+  carries a one-line hint that goes into the prompt — a bare `småord::andre` means
+  nothing to a model and collected whatever happened to be left over, and adding the
+  hints took accuracy on the same cards from 30 % to 98 %.
+  The stage invents nothing. A topic outside the catalogue is dropped rather than
+  accepted (it would create a tag-tree branch holding one card that nobody asked for),
+  and a word that fits nothing gets `null` and is left exactly as it was: an empty topic
+  is better than a forced one, because a person notices the empty one and never notices
+  the wrong one. On the existing base it sorted 157 of 162 cards, the remaining five
+  declined rather than guessed. Runs on the same chunking as the other backfills.
+- `ankiforgeai enrich pronunciation` and `ankiforgeai enrich examples` — backfill a
+  single enrich stage across the whole accumulated base, rather than over a fresh batch
+  from ingest. The pipeline's own stage (`pipeline._run_enrich_stage`) sends everything
+  handed to it in one LLM call, which is right for twenty freshly ingested words and
+  wrong for a thousand stored ones: the reply is cut off at the token limit and the
+  cards the model never reached stay silently empty.
+  So `enrich/backfill.py` splits the work into chunks, sends one call per chunk, and
+  **writes each chunk to the DB as it lands** — an interrupted run keeps what it already
+  did and re-running continues from there. A failed chunk is reported and skipped
+  instead of aborting the run. Neither command changes card status: this is filling in
+  fields, and the decision about a card stays with the human.
+  `--chunk N` (default 30), `--limit N`, `--status`, `--dry-run`. The default is 30
+  rather than "as many as fit" because on `llm.provider=claude_cli` a chunk of 50
+  consistently came back as `is_error` after ~180 s — the generation hits a server-side
+  ceiling and never completes, and three retries turn that into nine lost minutes per
+  chunk. `--limit` counts only cards that still need the stage, so a repeated run moves
+  forward instead of spending the quota on cards that are already done.
+  The other failure to expect on this provider is a plain `429`: `claude_cli` shares the
+  rate limit of the interactive Claude Code login, so a long backfill can run the quota
+  out mid-way. It surfaces as a failed chunk (visibly fast — under a second, with
+  `api_error_status: 429`, unlike the slow ceiling failure above), nothing is written for
+  it, and re-running the same command once the limit resets picks up exactly what is
+  still missing.
+- `ankiforgeai review html` — a self-contained review page for every `review`/`pending`
+  card: photo, headword, forms, example, and an inline player for the audio, all
+  embedded as `data:` URIs so the file works offline and can be published as-is. Cards
+  are marked for rejection by clicking, and a button assembles the matching
+  `review skip ...` / `review accept ...` commands — the page decides nothing itself.
+  Reviewing a hundred imported picture cards one at a time in the terminal is the wrong
+  shape of tool when the actual question is "does this photo match this word".
+- `ankiforgeai review accept --verified` stamps a `verified::<YYYY-MM-DD>` tag on the
+  cards it accepts, and that tag travels into Anki with the note — `tag:verified::*`
+  then finds everything a human has actually looked at, and a specific date finds what
+  was reviewed in one sitting. It is a flag rather than the default because the same
+  command is what scripts and AI agents call, and a "I checked this personally" mark
+  put there by an automaton would simply be false. The interactive `ankiforgeai review`
+  loop passes it on its own (a person is sitting there deciding), and the `review html`
+  page emits the flag in the command it assembles, since viewing that page *is* the
+  review. Re-accepting a card neither duplicates the tag nor rewrites the first date.
+
 ### Changed
+- `ankiforgeai push --deck NAME` sends one run to a different deck than the language
+  profile's. The deck came from `languages/{code}/language.yaml` → `anki.deck_name`
+  alone, so material that belongs in its own deck — a picture-dictionary import, a
+  textbook chapter — could only be separated by editing a file shared by every run of
+  that profile. A top-level deck rather than a subdeck: Anki's `deck:Norsk` matches
+  subdecks too, so `Norsk::Extra` would not be isolated from `sync`. An empty value
+  means "not given" and leaves the profile's deck in place.
+- `ankiforgeai review accept` now enriches in batches (`--batch-size`, default 25)
+  instead of handing the whole list to one LLM call. Each enrich stage sends a single
+  request covering everything passed to it, and `review html` assembles its accept
+  command over the entire reviewed list — so accepting a hundred-plus cards in one go
+  would have cost the whole batch its grammatical forms. A batch that fails no longer
+  takes the earlier ones with it: cards are saved as each batch finishes.
+- `ankiforgeai review edit` can now set `pos`. Part of speech is not always derivable —
+  an importer may read it off the article and fall back to an LLM for words that have
+  none, and that call can simply fail — and until now a card that came out with the
+  wrong `pos` could only be fixed by deleting it and importing the topic again. The value
+  is checked against the `POS` enum on the way in: a typo like `adjective` would not have
+  troubled the UPDATE, but the card would have stopped loading from the DB afterwards.
+  Changing `pos` also clears `forms`, since forms generated for the previous part of
+  speech do not describe the new one; the next `accept` regenerates them.
+- `Database.update_card()` now writes the `tags` column. It never did, so any tag added
+  after ingest — the `verified` one above included — was silently dropped on the next
+  save.
+- `run_ingest_pipeline()` gained `on_accepted` (runs right after INSERT, where cards
+  first have an id and therefore deterministic media filenames) and `force_review`
+  (accepted cards stay in `review` instead of `approved`).
+- The media stage now skips a card whose media file is already on disk, counting it as
+  `media_reused` instead of regenerating it. Without this, TTS would overwrite audio a
+  source recorded itself and an image search would overwrite its photograph — both
+  on import and again on the `review` → `accept` path, which re-runs enrichment.
 - `images.fallback_providers` now defaults to `[pexels, pixabay, openverse]` instead of
   `[]` — a noun with no results from `images.provider` (Unsplash's catalog is missing
   many common everyday nouns) now cascades through the other providers before giving up,
@@ -107,7 +201,141 @@ All notable changes to AnkiForgeAI will be documented in this file.
   `cp config.yaml.example config.yaml` (also done automatically by `ankiforgeai setup`). See
   `DEVELOPER_GUIDE.md` §11 for the one-time migration steps on existing checkouts.
 
+### Added
+- `ankiforgeai review html --status <what>` — re-read cards that are already decided.
+  The page only ever showed `review`/`pending`, which is right for its main job, but
+  left no way to look back over accepted cards: the only route was `review resume`,
+  which changes their status just to read them. `open` (review+pending) stays the
+  default; `approved`, `pushed`, `skipped`, `suspended`, individual statuses and `all`
+  are also accepted, and nothing in the DB is touched. Worth having — a typo
+  (`холодый`) was found in a card that had already passed a manual pass and carried a
+  `verified::` tag.
+
 ### Fixed
+- `push` no longer lets one deck's media overwrite another's. Media filenames are
+  `{card.id}_nb.mp3` / `{card.id}.jpg`, and `card.id` is unique only inside one SQLite
+  base — but `collection.media` is a single flat folder shared by the whole Anki
+  collection. Two bases therefore produce two different files called `1_nb.mp3`, and
+  `storeMediaFile` defaults to `deleteExisting: true`, which silently replaces the one
+  already there. Pushing a second base of 1223 cards overwrote the audio of all 297
+  notes in the neighbouring deck: the card read `en lue` ("шапка") and played `hvit`.
+  Nothing reported an error — both the note and the file existed, they had simply
+  stopped belonging to each other.
+  `store_media` now sends `deleteExisting: false`, so identical content still lands
+  under the same name (re-pushing a card does not multiply files) while diverging
+  content is stored beside it under a name carrying its hash. `push_approved` writes
+  the name that came *back* into the note instead of the one it asked for — previously
+  the return value was discarded, which is what made the note point at the other deck's
+  file. Local filenames stay deterministic: `card.audio` / `card.image` are rewritten in
+  memory only, and the `UPDATE` after the push touches just `status` and `anki_note_id`.
+  The collision is not hypothetical and the fix does not repair what it already broke —
+  an affected collection needs its media re-uploaded under names that do not clash.
+
+### Fixed
+- The `tags:` section of `config.yaml` now actually does something. `TagsConfig` has
+  offered `topic_prefix` / `level_prefix` / `pos_prefix` / `source_prefix` all along, but
+  `Card.auto_tags()` wrote `topic::` / `level::` / `pos::` / `source::` as literals and
+  never read them — the setting existed with no effect, so renaming a prefix silently
+  did nothing. `auto_tags()` now takes the section as an argument and falls back to the
+  active config; `push_approved` passes its own `cfg.tags`, so tags are built from the
+  same `Config` as the rest of the run, including one overridden by `--language`.
+- `Database.update_card` now writes the `topic` column. It was missing for the same
+  reason `pos` once was: topic looked like something only the importer set, so the
+  UPDATE never listed it. Anything that changes a topic outside of ingest — now
+  `enrich topics` — had its result live in the object and die with it, taking the
+  `topic::` tag with it.
+- Renaming a card's headword through `review edit` no longer leaves fields derived from
+  the old word behind. Only `forms` were cleared, and only when `pos` changed — so
+  editing `word` kept a paradigm belonging to a different lemma, a transcription reading
+  the previous word, and an example sentence containing it. A word change now clears
+  `forms`, `pronunciation`, `example` and `example_translation`, while a value passed in
+  the same call (`-f word=sokk -f example=...`) still wins over the clearing.
+- The audio player on the review page can be clicked again. Its CSS pinned
+  `height: 32px`, but Chrome's native control is 54px and its buttons live in a shadow
+  DOM that does not scale — the play button was simply clipped away. The sound itself
+  was fine the whole time (`play()` from the console resolved and reported a duration),
+  so from the outside this looked like missing audio rather than layout. The height is
+  no longer constrained, and a test refuses any `.audio` height below the native one.
+- `Database.update_card` now writes the `pos` column. It never did, so a part of
+  speech worked out by enrichment lived only in the object and died with it — the
+  card stayed `other` in the DB and went on losing its grammatical forms and its
+  `pos::noun` tag. Manual `review edit` was unaffected: it builds its own UPDATE.
+  Caught by running the new classification stage over 135 real cards, which reported
+  135 resolved and left the database byte-for-byte unchanged.
+- Part of speech is resolved at `review accept`, not only at import. It used to be a
+  detail of a single importer, so a card brought in with `--no-enrich` stayed
+  `other` forever: accept never looked at it again, and the card silently lost its
+  grammatical forms (`INFLECTED_POS` skips `other`), its image eligibility
+  (`images.only_for_pos`) and its `pos::noun` tag — the one Anki filters on to split a
+  nouns deck from a verbs deck. The logic now lives in `enrich/pos.py` as a stage of its
+  own and runs first in
+  `enrich_and_generate_media`, before grammar decides who inflects. Answers are keyed
+  by position rather than card id, because at import time the cards have no id yet.
+  One batched call, and only for the cards whose part of speech is genuinely unknown —
+  in a picture dictionary roughly one word in five, the ones with no article: plurale
+  tantum (`tenner`, `druer`), mass nouns (`melk`), adjectives (`glad`, `syk`).
+- A card that dedupe routes to human review keeps the photograph and audio its source
+  brought with it.
+  The download hook ran only for `accepted` cards, so anything sent to review as a
+  possible duplicate lost both — permanently: this hook is the only place that fetches
+  them, and re-running the same import will not recreate the card, because dedupe now
+  sees the card itself as the duplicate. The person then adjudicated the card looking
+  at an empty frame instead of the photograph the import was made for. The hook is
+  renamed `on_accepted` → `on_inserted` and now runs for every card that got an id;
+  those cards are also saved after it, which the review branch never did — otherwise
+  the filenames it sets live only in memory, leaving files on disk and empty columns
+  in the DB. Enrichment still skips them: they may yet turn out to be duplicates, and
+  a photo from a CDN costs one request rather than tokens.
+  Surfaced by a bulk import that hit the `claude_cli` rate limit: with LLM
+  adjudication unavailable every ambiguous match fell back to human review, and 301
+  of 694 cards arrived with no media at all.
+- Noun gender already on a card is no longer overwritten by a guess.
+  `prompts/grammar_forms.md` tells the model `"f" (ei — rare, treat as m if unsure)`,
+  i.e. to round feminines down to masculine on any doubt. An importer that reads gender
+  off a dictionary article knows better, so a gender already set travels into the request
+  as `known_forms`, not merely over the answer: feminine declension differs (`ei jente → jenta`, not
+  `jenten`), so overwriting the gender on top of a masculine paradigm would leave the
+  card self-contradictory. Whatever is already on the card wins over the model's reply.
+  Because a gender alone is not a paradigm, `enrich_grammar_batch` no longer decides by
+  `bool(card.forms)` but by `forms_complete()`, which checks the fields that part of
+  speech actually needs — otherwise such a card would look finished and never get
+  declined.
+- `provider: claude_cli` no longer loses a whole batch of cards to one hiccup. Two
+  separate faults, both hit while accepting 170 reviewed imported cards:
+  a non-zero exit from `claude -p` was raised as `RuntimeError`, which `_is_transient`
+  deliberately excludes from retries — right for "no API key" or "CLI not in PATH",
+  wrong for the exit code 1 with empty output the CLI returns when the service is
+  busy. One such exit marked every card in the batch `enrich_incomplete` and sent them
+  back to `review` without forms. Non-zero exits, unparsable envelopes, and
+  `is_error` responses now raise `ClaudeCliError`, which retries; a missing binary
+  stays a permanent `RuntimeError`. The error message also carries stdout, not only
+  stderr: with `--output-format json` the CLI puts the reason in the envelope on
+  stdout, which is why the failure logged as `завершился с кодом 1: ` with nothing
+  after the colon.
+  And `llm.claude_cli_timeout_seconds` went from 120 to 600. Each headless call boots
+  the CLI with its full system prompt before generating, and the batch enrich stages
+  ask for forms or examples covering dozens of words at once — a measured call over 25
+  nouns took 130 s, of which 107 s was time-to-first-token. At 120 s that call did not
+  fail fast, it burned three two-minute attempts and then dropped the batch anyway.
+- `_parse_json` survives an answer the model wrote as prose plus JSON rather than
+  JSON alone. Two shapes, both seen while accepting a batch of imported cards:
+  a fenced block followed by commentary (the closing ``` ended up mid-text, so the
+  whole answer was invalid), and an answer split across several fenced blocks with
+  notes between them (`json.loads` calls that "Extra data"). 45 cards lost their
+  transcription to it — and silently got no retry either, because `JSONDecodeError`
+  subclasses `ValueError`, which `_is_transient` excludes on the grounds that a
+  malformed answer will not fix itself. Fences are now cut at the closing marker
+  wherever it is, and every JSON value in the text is collected and merged, so an
+  answer split in two no longer loses the second half.
+- The grammar enrich stage no longer regenerates forms a card already has. It was the
+  only one of the three batch stages without that filter — `enrich_pronunciation_batch`
+  and `enrich_example_batch` both ask only about what is missing. On a re-accept (a card
+  bounced back to `review` because a different stage failed) it meant re-deriving every
+  paradigm in the batch: minutes of extra generation, and one more chance for a
+  transient failure to take the whole batch down with it. Accepting a batch of 170 imported
+  cards needed forms for 25 of them and would have asked for 139. A card whose
+  forms genuinely must be recomputed has them cleared explicitly — see `edit_card` on a
+  part-of-speech change.
 - Forms-grid labels (gender/number/tense) in the nb/de/es language profiles, and noun
   gender (masculine/feminine/neuter) rendered by `_GENDER_MAP_NB`/`_GENDER_MAP_DE` in
   `notetype.py`, were hardcoded in Russian instead of the target language — leaking

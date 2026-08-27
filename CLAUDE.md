@@ -18,6 +18,25 @@ uv pip install -e ".[dev]"
 ankiforgeai ingest topic "еда" --count 20 --level A2
 ankiforgeai ingest url https://...
 ankiforgeai review
+ankiforgeai review html     # страница ревью со всеми фото и аудио одним файлом
+ankiforgeai review html --status approved   # перечитать уже принятое, статус не меняя
+                            # (open — дефолт: review+pending; ещё pushed/skipped/suspended/all)
+ankiforgeai review accept --verified <id>...   # + тег verified::<дата>, «проверил лично»;
+                            # флаг, а не дефолт — accept зовут и скрипты. Интерактивный
+                            # `review` и страница `review html` ставят его сами
+ankiforgeai enrich topics  # разложить по темам слова, пришедшие без неё или с
+                           # придуманной на ходу («еда-и-напитки» рядом с
+                           # mat-og-drikke). Справочник = темы, уже встречающиеся
+                           # в базе + extra_topics из languages/{code}/language.yaml
+                           # (там же пояснения к ним для модели). Тема не из
+                           # справочника отбрасывается, null оставляет как было
+ankiforgeai enrich pronunciation   # догон транскрипции по всей накопленной базе
+ankiforgeai enrich examples        # догон примера с переводом
+                           # Обе — LLM, но батчами с записью после каждого куска:
+                           # обрыв не отменяет сделанное, повторный запуск
+                           # продолжает с того же места. --chunk N (размер батча),
+                           # --limit N (пробный прогон), --status, --dry-run.
+                           # Статус карточки не меняют — это дозаполнение полей
 ankiforgeai push
 ankiforgeai sync
 ankiforgeai stats
@@ -83,8 +102,12 @@ Review can interrupt at any stage — user sees pending/review cards and accepts
 | `anki/notetype.py` | LanguageCard note type definition: 12 fields, HTML/CSS templates |
 | `ingest/topic.py` | Calls Claude with `prompts/topic_words.md` → `list[Card]` |
 | `enrich/grammar.py` | Calls Claude with `prompts/grammar_forms.md` → populates `card.forms` |
+| `enrich/pos.py` | Доопределение части речи у карточек, которым её не дал источник (`prompts/pos_classify.md`): от неё зависят и формы (INFLECTED_POS), и картинки (`images.only_for_pos`), и тег `pos::` в Anki |
+| `enrich/topics.py` | Раскладка по темам (тег `topic::` в Anki): справочник = темы из базы + `extra_topics` профиля, ничего не выдумывает — тему вне справочника отбрасывает |
+| `enrich/backfill.py` | Догон одной enrich-стадии по всей базе: режет карточки на куски, шлёт по одному LLM-вызову на кусок и пишет результат сразу — в отличие от `pipeline._run_enrich_stage`, где вся пачка идёт одним вызовом и обрыв теряет всё |
 | `media/tts.py` | edge-tts → `{card.id}_nb.mp3` in `media/audio/` |
 | `media/images.py` | Provider from `images.provider` (unsplash/pexels/pixabay/openverse) → `{card.id}.jpg` in `media/images/` (nouns only) |
+| `review/html_report.py` | Самодостаточная HTML-страница ревью: фото и mp3 вшиты как data: URI, на выходе — готовые `review skip/accept` для терминала |
 | `review/interactive.py` | rich + questionary terminal UI; `accept` batches enrich/media via `pipeline.enrich_and_generate_media()` at session end |
 
 ## Principles
@@ -94,7 +117,7 @@ Review can interrupt at any stage — user sees pending/review cards and accepts
 3. **All LLM calls go through `llm.py`**, provider selected by `llm.provider` in `config.yaml`: `openrouter` (OpenAI-compatible SDK, default), `anthropic` (Claude SDK), or `claude_cli` (headless `claude -p` subprocess, no key needed — reuses the local `claude login`; shares that login's rate limit/quota with interactive Claude Code usage, so it's for occasional manual generation, not high-volume cron). No local models — "no local models" means no local *inference* (Ollama/llama.cpp etc.); `claude_cli` still calls the real first-party Claude service, just through a different local transport/auth than the other two providers.
 4. **Prompts in `languages/{code}/prompts/*.md`**, falling back to top-level `prompts/*.md` — edit them to improve card quality without touching Python. No hardcoded per-language prompt text in Python (see `enrich/translation.py` for the pattern).
 5. **All DB operations in transactions** via `Database.connect()` context manager.
-6. **Media filenames are deterministic**: `{card.id}_nb.mp3`, `{card.id}.jpg` (the `_nb` suffix is legacy and not language-specific). Store filename only, not path.
+6. **Media filenames are deterministic**: `{card.id}_nb.mp3`, `{card.id}.jpg` (the `_nb` suffix is legacy and not language-specific). Store filename only, not path. But `card.id` is unique only *within one SQLite base*, while Anki's `collection.media` is a single flat folder for the whole collection — two bases give two different files named `1_nb.mp3`. So `store_media` uploads with `deleteExisting: false` and `push` puts the **returned** name into the note; never assume the name you asked for is the name Anki used.
 7. **Target language is per-profile**, not hardcoded. Currently `nb`/`de`/`en`/`es`; Nynorsk not supported within `nb`.
 
 ## Config
