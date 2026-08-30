@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ from ankicards.config import (
     TagsConfig,
     TTSConfig,
 )
+from ankicards.db import Database
 from ankicards.models import POS, Card
 from ankicards.pipeline import NoteTypeMissingError
 
@@ -86,9 +88,9 @@ def test_no_env_no_example_still_writes_keys(
 # ─── _generate_first_card ───
 
 
-def _make_config(tmp_path: Path) -> Config:
+def _make_config(tmp_path: Path, language: str = "nb") -> Config:
     return Config(
-        language="nb",
+        language=language,
         paths=PathsConfig(
             db=tmp_path / "test.db",
             logs_dir=tmp_path / "logs",
@@ -274,3 +276,80 @@ def test_generate_first_card_respects_small_words_per_day(
     setup_wizard._generate_first_card(3)
 
     assert captured["count"] == 3
+
+
+def test_generate_first_card_backfills_legacy_rows_with_configured_language(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: _generate_first_card's Database(cfg.paths.db) call used to omit
+    default_language=cfg.language, so re-running `ankiforgeai setup` against an
+    existing pre-issue-63 DB (no cards.language column yet) silently backfilled
+    every legacy row to the hardcoded "nb" default — even when the wizard had
+    just saved a different language to config.yaml. Reproduce that upgrade
+    scenario with a language other than "nb" so the bug can't hide behind a
+    default that happens to match."""
+    cfg = _make_config(tmp_path, language="de")
+    cfg.paths.db.parent.mkdir(parents=True, exist_ok=True)
+
+    conn = sqlite3.connect(cfg.paths.db)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE cards (
+                id                  INTEGER PRIMARY KEY,
+                word                TEXT NOT NULL,
+                pronunciation       TEXT,
+                translation         TEXT NOT NULL,
+                image_query         TEXT,
+                example             TEXT,
+                example_translation TEXT,
+                pos                 TEXT NOT NULL,
+                forms               TEXT,
+                level               TEXT,
+                topic               TEXT,
+                source              TEXT,
+                image               TEXT,
+                audio               TEXT,
+                tags                TEXT,
+                status              TEXT NOT NULL DEFAULT 'pending',
+                date_added          TEXT NOT NULL,
+                anki_note_id        INTEGER
+            );
+            CREATE TABLE anki_cache (
+                note_id     INTEGER PRIMARY KEY,
+                word        TEXT NOT NULL,
+                fields      TEXT NOT NULL,
+                tags        TEXT,
+                synced_at   TEXT NOT NULL
+            );
+            CREATE TABLE audit_log (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp   TEXT NOT NULL,
+                action      TEXT NOT NULL,
+                card_id     INTEGER,
+                details     TEXT,
+                run_id      TEXT
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO cards (id, word, translation, pos, status, date_added) "
+            "VALUES (1, 'Haus', 'дом', 'noun', 'pending', '2026-01-01')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    async def fake_ingest(
+        topic: str, count: int, level: str, exclude_words: list[str]
+    ) -> list[Card]:
+        return []
+
+    _patch_common(monkeypatch, cfg, ingest_by_topic=fake_ingest)
+
+    setup_wizard._generate_first_card(10)
+
+    db = Database(cfg.paths.db, default_language="nb")  # reopening must not overwrite
+    card = db.get_by_id(1)
+    assert card is not None
+    assert card.language == "de"  # not the hardcoded "nb" fallback

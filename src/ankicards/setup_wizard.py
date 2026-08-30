@@ -149,7 +149,7 @@ def _generate_first_card(count: int) -> str:
         from .pipeline import NoteTypeMissingError, push_approved, run_ingest_pipeline
 
         cfg = get_config()
-        db = Database(cfg.paths.db)
+        db = Database(cfg.paths.db, default_language=cfg.language)
         exclude = [w for _, w in db.all_words()]
         cards = await ingest_by_topic(
             topic=_FIRST_BATCH_TOPIC,
