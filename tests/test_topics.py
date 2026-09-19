@@ -74,7 +74,9 @@ def test_catalogue_skips_topics_that_themselves_need_sorting(db: Database, monke
             code="nb", name="nb", extra_topics={"egenskaper": "признак", "småord::mengde": ""}
         ),
     )
-    cfg = config_module.get_config()
+    # Справочник читает базу по cfg.language, а карточки выше — nb: язык берём
+    # не из config.yaml (там может стоять en), а тот же, что у карточек.
+    cfg = config_module.get_config().model_copy(update={"language": "nb"})
     catalogue = known_topics(db, cfg)
 
     assert set(catalogue) == {
