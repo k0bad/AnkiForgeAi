@@ -4,7 +4,7 @@
 - nb-NO-FinnNeural    (мужской)
 - nb-NO-PernilleNeural (женский)
 
-Имя файла детерминировано: {card.id}_nb.mp3
+Имя файла детерминировано: {card.id}_{card.language}.mp3
 Сохраняется в media/audio/, в БД хранится только имя.
 """
 
@@ -29,10 +29,14 @@ def _pronounceable_text(card: Card) -> str:
     return text
 
 
-def _voice_for(cfg: Config) -> str:
-    """Голос TTS: сначала из языкового профиля (languages/{code}/language.yaml),
-    cfg.tts — как fallback для языков без своих голосов в профиле."""
-    lang_tts = get_language(cfg.language).tts
+def _voice_for(language: str, cfg: Config) -> str:
+    """Голос TTS: сначала из языкового профиля (languages/{code}/language.yaml)
+    карточки, cfg.tts — как fallback для языков без своих голосов в профиле.
+
+    Берёт language отдельным параметром, а не cfg.language (issue #63): голос
+    должен соответствовать самой карточке, card.language — авторитетный
+    источник для этого, а не то, какой язык сейчас активен в cfg."""
+    lang_tts = get_language(language).tts
     default_voice = (lang_tts.get("default_voice") or cfg.tts.default_voice).lower()
     if default_voice == "male":
         return lang_tts.get("voice_male") or cfg.tts.voice_male
@@ -41,12 +45,15 @@ def _voice_for(cfg: Config) -> str:
 
 async def generate_audio(card: Card, cfg: Config) -> Card:
     """Сгенерировать .mp3 для card.word, обновить card.audio."""
-    filename = f"{card.id}_nb.mp3"
+    # card.language, а не cfg.language — суффикс раньше был захардкожен как "nb"
+    # для всех языков (issue #63 расширила Card на многоязычность, но не тронула
+    # tts.py); теперь имя файла отражает реальный язык самой карточки.
+    filename = f"{card.id}_{card.language}.mp3"
     out_path = cfg.paths.audio_dir / filename
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     text = _pronounceable_text(card)
-    voice = _voice_for(cfg)
+    voice = _voice_for(card.language, cfg)
     logger.debug("tts.synthesize", card_id=card.id, voice=voice)
     await _synthesize(
         text=text,
